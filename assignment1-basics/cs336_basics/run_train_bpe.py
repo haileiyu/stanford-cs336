@@ -5,7 +5,7 @@ import inspect
 from collections import Counter
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-
+type bytes_pair = tuple[bytes, bytes]
 
 def get_word_tuples_to_count(input_path: str | os.PathLike) -> dict[tuple[bytes, ...], int]:
     with open(input_path, "r") as content_file:
@@ -54,22 +54,6 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    # in the first version, i'm gonna do it in the simplest way possible.
-    # the algorithm can be broken down into:
-    # 1. load the entire file into memory. future optimzations: scan each line and process each line.
-    # 2. pre-tokenization: split the file by whitespaces. store the results as a {word, count} map.
-    # 3. in a loop:
-    #      initial vocabulary is 256 bytes and a textstopper
-    #      create a map {word, []{vocabulary, count}}
-    #      merge the results into {token, count}
-    #      select the highest frequency token in this round
-    #      add that token into the vocabulary
-    #      repeat
-    # 4. finally, print out the tokens
-    # note:
-    # - should probably start with a smaller text file
-    # - should print the output of each step
-
     # pretokenization
     word_tuples_to_count = get_word_tuples_to_count(input_path)
     print_var(word_tuples_to_count)
@@ -81,6 +65,8 @@ def run_train_bpe(
 
     vocab = set(vocab_list)
     print_var(vocab)
+
+    merges : list[tuple[bytes, bytes]] = []
 
     # iterate and find most common pair
     # for i in range(len(vocab), vocab_size + 1): # should use while loop instead
@@ -94,12 +80,19 @@ def run_train_bpe(
         print_var(total_pair_to_count)
 
         most_frequent_pair = get_most_frequent_pair(total_pair_to_count)
+        merges.append(most_frequent_pair)
 
         print_var(most_frequent_pair)
-        vocab.add(most_frequent_pair)
+        new_vocab = most_frequent_pair[0] + most_frequent_pair[1]
+        vocab.add(new_vocab)
         print("vocab size:", len(vocab))
         # need to change the word_tuples_to_count
-        update_word_tuples_to_count(word_tuples_to_count, most_frequent_pair)
+        update_word_tuples_to_count(word_tuples_to_count, new_vocab)
+
+    # next: keep the merges.
+    # next: change the vocab to the desired data structure.
+
+    print_var(merges)
 
     return {}, []
 
@@ -139,18 +132,19 @@ def get_new_word_tuple(word_tuple: tuple[bytes, ...], new_vocab: bytes) -> tuple
     return tuple(new_word_list)
 
 
-def get_most_frequent_pair(pair_to_count: dict[bytes, int]) -> bytes:
+def get_most_frequent_pair(pair_to_count: dict[bytes_pair, int]) -> bytes_pair:
     highest_count = 0
-    most_common_pairs: list[bytes] = []
+    most_common_pair_ties: list[bytes_pair] = []
     for pair in pair_to_count:
         if pair_to_count[pair] > highest_count:
             highest_count = pair_to_count[pair]
-            most_common_pairs = [pair]
+            most_common_pair_ties = [pair]
         elif pair_to_count[pair] == highest_count:
-            most_common_pairs.append(pair)
+            most_common_pair_ties.append(pair)
 
-    most_common_pairs.sort(reverse=True)
-    return most_common_pairs[0]
+    # need to build a map from 
+    most_common_pair_ties.sort(key=lambda pair: pair[0] + pair[1], reverse=True)
+    return most_common_pair_ties[0]
 
 
 def to_bytes(w: str) -> bytes:
@@ -158,11 +152,12 @@ def to_bytes(w: str) -> bytes:
 
 
 def print_var(var):
+    """this helper function is created by gemini."""
     # 1. Look back at the frame of the code that called this function
-    frame = inspect.currentframe().f_back
+    frame = inspect.currentframe().f_back # type: ignore
 
     # 2. Grab the exact line of text where print_var() was executed
-    call_line = inspect.getframeinfo(frame).code_context[0].strip()
+    call_line = inspect.getframeinfo(frame).code_context[0].strip() # type: ignore
 
     # 3. Extract whatever text was placed inside the parentheses
     # e.g., "print_var(total_count)" -> "total_count"
@@ -187,29 +182,3 @@ if __name__ == "__main__":
     # get_vocab_pair_count_in_word((b'a', b'b', b'b', b'b', b'a'), {b'a', b'b'})
     run_train_bpe(sys.argv[1], 300, ["<|endoftext|>"])
 
-
-###############################################################################################
-
-
-def get_vocab_pair_count_in_word_deprecated(word: str, vocab: set[bytes]) -> dict[bytes, int]:
-    """
-    this is the minimal test example for the "find pair" algorithm.
-    this was under the wrong assumption, so the algorithm is deprecated.
-    """
-    pair_to_count = Counter()
-
-    for i in range(len(word)):
-        for j in range(i + 1, len(word)):
-            curr = to_bytes(word[i:j])
-            print(curr)
-            if not curr in vocab:
-                continue
-
-            for k in range(j + 1, len(word) + 1):
-                next = to_bytes(word[j:k])
-                if not next in vocab:
-                    continue
-                pair = curr + next
-                pair_to_count[pair] += 1
-
-    return pair_to_count
