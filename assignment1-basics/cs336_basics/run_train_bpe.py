@@ -1,6 +1,7 @@
 import os
 import sys
 import regex as re
+from collections import Counter
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
@@ -69,17 +70,18 @@ def run_train_bpe(
     #      select the highest frequency pair in this round
     #      add that token into the vocabulary
     #      repeat
-    vocab: list[bytes] = [bytes([i]) for i in range(256)]
+    vocab_list: list[bytes] = [bytes([i]) for i in range(256)]
     for t in special_tokens:
-        vocab.append(to_bytes(t))
+        vocab_list.append(to_bytes(t))
 
+    vocab = set(vocab_list)
     print(vocab)
 
-    pair_to_count = {}
+    pair_to_count = Counter()
     for w in word_to_count:
-        pair_count = get_pair_count_for_word(w, {})  # using an empty vocab since vocab doesn't matter right now.
+        pair_count = get_vocab_pair_count_in_word(w, vocab)
         for p in pair_count:
-            pair_to_count[p] = pair_to_count.get(p, 0) + word_to_count[w] * pair_count[p]
+            pair_to_count[p] += word_to_count[w] * pair_count[p]
 
     print("> pair_to_count")
     print(pair_to_count)
@@ -104,6 +106,8 @@ def get_most_frequent_pair(pair_to_count: dict[bytes, int]) -> bytes:
         elif pair_to_count[pair] == highest_count:
             most_common_pairs.append(pair)
 
+    print(most_common_pairs)
+
     if len(most_common_pairs) == 1:
         return most_common_pairs[0]
     elif len(most_common_pairs) > 1:
@@ -113,43 +117,33 @@ def get_most_frequent_pair(pair_to_count: dict[bytes, int]) -> bytes:
         raise RuntimeError
 
 
-def get_pair_count_for_word(w: str, vocab: dict[bytes, int]) -> dict[bytes, int]:
-    # option 1: find all the possible pairs of the dict, and then find their frequency in the corpus.
-    # this will be very slow, since the number of pairs will be large as we iterate. e.g. when the vocab size is 10k,
-    # there will be 100M pairs.
-    # option 2: optimize option 1. only find all the possible pairs of the dict from possible vocabs. e.g. if a word only
-    # contains abc, then we don't need to find the vocab pairs that contains xyz.
-    # option 3: greedy -- when handling a word, do it character by character. when you iterate char[0], check if the following
-    # chars are in the vocab. the problem is that, as the vocab contains longer and longer words, we need to check more and more
-    # trailing characters. however, there will be an upper bound, as the words won't be infinitely long.
-    # let's implement option 3 as a baseline.
-
-    pair_count = {}
-    # if len too short, no pair
-    if len(w) == 1:
-        return pair_count
-    # otherwise, iterate the string.
-    for i in range(len(w) - 1):
-        pair = w[i : i + 2]
-
-        if pair in pair_count:
-            pair_count[pair] = pair_count[pair] + 1
-        else:
-            pair_count[pair] = 1
-
-    return pair_count
-    # check if the pair is in the vocab.
-    # first, check if substr is in the vocab. if not, skip.
-    # if so, increment the count for curr + substr
-    # but curr should be var length as well
-
-    # next: change this -- implement the v0 where we focus on single characters. then in the next version, we handle
-    # the varlength
-
-
 def to_bytes(w: str) -> bytes:
     return w.encode("utf-8")
 
 
+def get_vocab_pair_count_in_word(word: str, vocab: set[bytes]) -> dict[bytes, int]:
+    """
+    this is the minimal test example for the "find pair" algorithm.
+    """
+    pair_to_count = Counter()
+
+    for i in range(len(word)):
+        for j in range(i + 1, len(word)):
+            curr = to_bytes(word[i:j])
+            print(curr)
+            if not curr in vocab:
+                continue
+
+            for k in range(j + 1, len(word) + 1):
+                next = to_bytes(word[j:k])
+                if not next in vocab:
+                    continue
+                pair = curr + next
+                pair_to_count[pair] += 1
+
+    return pair_to_count
+
+
 if __name__ == "__main__":
+    # get_vocab_pair_count_in_word('abba', {b'a', b'b'})
     run_train_bpe(sys.argv[1], 500, ["<|endoftext|>"])
