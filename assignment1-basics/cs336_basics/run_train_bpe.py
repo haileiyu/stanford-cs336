@@ -36,8 +36,12 @@ def run_train_bpe(
                 Merges are ordered by order of creation.
     """
     # pretokenization
-    word_tuples_to_count = get_word_tuples_to_count(input_path)
-    print_var(word_tuples_to_count)
+    word_tuples_to_count = get_word_tuples_to_count(input_path, special_tokens)
+
+    for w in word_tuples_to_count:
+        for b in w:
+            if len(b) != 1:
+                print(f"word: {w}, vocab: {b}")
 
     # build initial vocabulary
     vocab_list: list[bytes] = [bytes([i]) for i in range(256)]
@@ -45,7 +49,6 @@ def run_train_bpe(
         vocab_list.append(to_bytes(t))
 
     vocab = {b: i for i, b in enumerate(vocab_list)}
-    print_var(vocab)
 
     merges: list[tuple[bytes, bytes]] = []
 
@@ -58,39 +61,44 @@ def run_train_bpe(
             for p in pair_to_count:
                 total_pair_to_count[p] += word_tuples_to_count[wt] * pair_to_count[p]
 
-        print_var(total_pair_to_count)
         most_frequent_pair = get_most_frequent_pair(total_pair_to_count)
         merges.append(most_frequent_pair)
+        len_merges = len(merges)
 
         new_vocab = most_frequent_pair[0] + most_frequent_pair[1]
-        print_var(new_vocab)
-        vocab_len = len(vocab)
         vocab[new_vocab] = len(vocab)
 
         # need to change the word_tuples_to_count
         update_word_tuples_to_count(word_tuples_to_count, new_vocab)  # todo: use a bytes_pair for new_vocab
 
-    print_var(merges)
-    print_var(vocab)
-
     return {value: key for key, value in vocab.items()}, merges
 
 
-def get_word_tuples_to_count(input_path: str | os.PathLike) -> dict[tuple[bytes, ...], int]:
+def get_word_tuples_to_count(input_path: str | os.PathLike, special_tokens: list[str]) -> dict[tuple[bytes, ...], int]:
     with open(input_path, "r") as content_file:
         content = content_file.read()
 
+    # first, split on the special tokens.
+    escaped_special_tokens = []
+    for special_token in special_tokens:
+        escaped = re.escape(special_token)
+        escaped_special_tokens.append(escaped)
+
+    # make sure not to use group so that we skip the special tokens themselves.
+    split_pattern = "|".join(escaped_special_tokens)
+
+    splitted = re.split(split_pattern, content)
     word_to_count = Counter()
-    for m in re.finditer(PAT, content):
-        word = m.group()
-        word_to_count[word] += 1
-    print_var(word_to_count)
+    for p in splitted:
+        if p in special_tokens:
+            continue
+        for m in re.finditer(PAT, p):
+            word_to_count[m.group()] += 1
 
     word_tuples_to_count: dict[tuple[bytes, ...], int] = {}
     for word in word_to_count:
         # split the word into tuples
-        # we can use a hack here since the initial vocabulary are all singe bytes
-        bytes_tuple = tuple(char.encode("utf-8") for char in word)
+        bytes_tuple = tuple([bytes([x]) for x in word.encode("utf-8")])
         word_tuples_to_count[bytes_tuple] = word_to_count[word]
 
     return word_tuples_to_count
@@ -112,7 +120,7 @@ def update_word_tuples_to_count(to_update: dict[tuple[bytes, ...], int], new_voc
                 count = to_update[word_tuple]
                 to_update[new_word_tuple] = to_update.get(new_word_tuple, 0) + count
                 del to_update[word_tuple]
-                i += 1
+                i += 1  # todo: does this line make sense at all? i was fixing something in get_new_word_tuple fwiw.
                 break  # otherwise there is a crash since word_tuple is deleted from the map already.
 
 
@@ -195,12 +203,4 @@ def get_vocab_pair_count_in_word(word: tuple[bytes, ...], vocab: dict[bytes, int
 
 
 if __name__ == "__main__":
-    # print(get_new_word_tuple((b' ', b't', b'h', b'e'), b' t'))
-    a = (b" ", b"d")
-    b = (b" a", b"nd")
-    c = [a, b]
-    c.sort(key=lambda pair: pair[0] + pair[1], reverse=True)
-    print(c)
-
-    # get_vocab_pair_count_in_word((b'a', b'b', b'b', b'b', b'a'), {b'a', b'b'})
-    # run_train_bpe(sys.argv[1], 300, ["<|endoftext|>"])
+    run_train_bpe(sys.argv[1], 260, ["<|endoftext|>"])
