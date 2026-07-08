@@ -164,3 +164,7 @@ cython_debug/
 
 # Datasets (TinyStories, OpenWebText sample) and generated artifacts
 data/
+
+# Profiling
+*.lprof
+

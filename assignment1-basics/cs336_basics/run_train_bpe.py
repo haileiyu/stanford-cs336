@@ -4,6 +4,7 @@ import regex as re
 import inspect
 from collections import Counter
 
+
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 type bytes_pair = tuple[bytes, bytes]
 
@@ -36,9 +37,9 @@ def run_train_bpe(
                 Merges are ordered by order of creation.
     """
     # pretokenization
-    word_tuples_to_count = get_word_tuples_to_count(input_path, special_tokens)
+    word_tuple_to_count = get_word_tuple_to_count(input_path, special_tokens)
 
-    for w in word_tuples_to_count:
+    for w in word_tuple_to_count:
         for b in w:
             if len(b) != 1:
                 print(f"word: {w}, vocab: {b}")
@@ -50,31 +51,31 @@ def run_train_bpe(
 
     vocab = {b: i for i, b in enumerate(vocab_list)}
 
-    merges: list[tuple[bytes, bytes]] = []
-
     # iterate and find most common pair
-    # for i in range(len(vocab), vocab_size + 1): # should use while loop instead
+    merges: list[bytes_pair] = []
     while len(vocab) < vocab_size:
-        total_pair_to_count = Counter()
-        for wt in word_tuples_to_count:
-            pair_to_count = get_vocab_pair_count_in_word(wt, vocab)
-            for p in pair_to_count:
-                total_pair_to_count[p] += word_tuples_to_count[wt] * pair_to_count[p]
+        total_pair_to_count : Counter[bytes_pair] = Counter()
+        for word_tuple in word_tuple_to_count:
+            # update the dict directly
+            update_total_pair_to_count(total_pair_to_count, word_tuple, word_tuple_to_count[word_tuple])
 
         most_frequent_pair = get_most_frequent_pair(total_pair_to_count)
         merges.append(most_frequent_pair)
-        len_merges = len(merges)
 
         new_vocab = most_frequent_pair[0] + most_frequent_pair[1]
         vocab[new_vocab] = len(vocab)
-
-        # need to change the word_tuples_to_count
-        update_word_tuples_to_count(word_tuples_to_count, new_vocab)  # todo: use a bytes_pair for new_vocab
-
+        update_word_tuples_to_count(word_tuple_to_count, new_vocab)
+    
     return {value: key for key, value in vocab.items()}, merges
 
 
-def get_word_tuples_to_count(input_path: str | os.PathLike, special_tokens: list[str]) -> dict[tuple[bytes, ...], int]:
+def update_total_pair_to_count(total_pair_to_count: Counter[bytes_pair], word_tuple: tuple[bytes, ...], word_tuple_count: int):
+    for i in range(len(word_tuple) - 1):
+        pair = (word_tuple[i], word_tuple[i + 1])
+        total_pair_to_count[pair] += word_tuple_count
+
+
+def get_word_tuple_to_count(input_path: str | os.PathLike, special_tokens: list[str]) -> dict[tuple[bytes, ...], int]:
     with open(input_path, "r") as content_file:
         content = content_file.read()
 
@@ -164,11 +165,9 @@ def get_most_frequent_pair(pair_to_count: dict[bytes_pair, int]) -> bytes_pair:
         elif pair_to_count[pair] == highest_count:
             most_common_pair_ties.append(pair)
 
-    # most_common_pair_ties.sort(key=lambda pair: pair[0] + pair[1], reverse=True)
     if len(most_common_pair_ties) == 0:
         raise RuntimeError
     return max(most_common_pair_ties)
-    # return most_common_pair_ties[0]
 
 
 def to_bytes(w: str) -> bytes:
@@ -193,14 +192,5 @@ def print_var(var):
     print(f"{var_name}={repr(var)}")
 
 
-def get_vocab_pair_count_in_word(word: tuple[bytes, ...], vocab: dict[bytes, int]) -> dict[bytes_pair, int]:
-    pair_to_count = Counter()
-    for i in range(len(word) - 1):
-        pair = (word[i], word[i + 1])
-        pair_to_count[pair] += 1
-
-    return pair_to_count
-
-
 if __name__ == "__main__":
-    run_train_bpe(sys.argv[1], 260, ["<|endoftext|>"])
+    run_train_bpe(sys.argv[1], 500, ["<|endoftext|>"])

@@ -138,17 +138,6 @@ class Snapshot[A: (np.ndarray, Tensor)]:
 
         if isinstance(actual, dict):
             for key in actual:
-                if key == "merges":
-                    print('actual:')
-                    print(actual[key])
-                    print('expected:')
-                    print(expected_data[key])
-                    for i, (x, y) in enumerate(zip(actual[key], expected_data[key])):
-                        if x != y:
-                            print(f"First divergence at index {i}:")
-                            print(f"  a[{i}] = {x!r}")
-                            print(f"  b[{i}] = {y!r}")
-            for key in actual:
                 if key not in expected_data:
                     raise AssertionError(f"Key '{key}' not found in snapshot for {test_name}")
                 assert actual[key] == expected_data[key], (
