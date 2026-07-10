@@ -168,3 +168,6 @@ data/
 # Profiling
 *.lprof
 
+# Documents
+*.pdf
+

@@ -105,24 +105,28 @@ def get_word_tuple_to_count(input_path: str | os.PathLike, special_tokens: list[
     return word_tuples_to_count
 
 
-def update_word_tuples_to_count(to_update: dict[tuple[bytes, ...], int], new_vocab: bytes):
+def update_word_tuples_to_count(word_tuples_to_count: dict[tuple[bytes, ...], int], new_vocab: bytes):
     """updates the tuple[bytes, ...] and merge the common pairs."""
-    # list(to_update) only copies a flat list of references (very lightweight). this is to avoid
+    # list(word_tuples_to_count) only copies a flat list of references (very lightweight). this is to avoid
     # changing a dict's length while iterating it, which python forbids.
-    for word_tuple in list(to_update):
-        for i in range(len(word_tuple) - 1):
-            pair = word_tuple[i] + word_tuple[i + 1]
-            if pair == new_vocab:
-                new_word_tuple = get_new_word_tuple(word_tuple, new_vocab)
-                # the new tuple shouldn't exist in the map, because a new word tuple contains
-                # something we've never seen before.
-                # well is it possible that the new word tuple was added to the dict earlier in
-                # this forloop? yes, e.g. if the new_vocab is abc, it could come from ab + c, and a + bc.
-                count = to_update[word_tuple]
-                to_update[new_word_tuple] = to_update.get(new_word_tuple, 0) + count
-                del to_update[word_tuple]
-                i += 1  # todo: does this line make sense at all? i was fixing something in get_new_word_tuple fwiw.
-                break  # otherwise there is a crash since word_tuple is deleted from the map already.
+    for word_tuple in list(word_tuples_to_count):
+        if word_tuple_has_vocab(word_tuple, new_vocab):
+            new_word_tuple = get_new_word_tuple(word_tuple, new_vocab)
+            # the new tuple shouldn't exist in the map, because a new word tuple contains
+            # something we've never seen before.
+            # well is it possible that the new word tuple was added to the dict earlier in
+            # this forloop? yes, e.g. if the new_vocab is abc, it could come from ab + c, and a + bc.
+            count = word_tuples_to_count[word_tuple]
+            word_tuples_to_count[new_word_tuple] = word_tuples_to_count.get(new_word_tuple, 0) + count
+            del word_tuples_to_count[word_tuple]
+
+
+def word_tuple_has_vocab(word_tuple:tuple[bytes, ...], new_vocab: bytes):
+    for i in range(len(word_tuple) - 1):
+        pair = word_tuple[i] + word_tuple[i + 1]
+        if pair == new_vocab:
+            return True
+    return False
 
 
 def get_new_word_tuple(word_tuple: tuple[bytes, ...], new_vocab: bytes) -> tuple[bytes, ...]:
@@ -193,4 +197,7 @@ def print_var(var):
 
 
 if __name__ == "__main__":
-    run_train_bpe(sys.argv[1], 500, ["<|endoftext|>"])
+    # run_train_bpe(sys.argv[1], int(sys.argv[2]), ["<|endoftext|>"])
+    word_tuple = (b't', b'h', b't', b'h', b't', b'h')
+    new_vocab = b'th'
+    print(get_new_word_tuple(word_tuple, new_vocab))
