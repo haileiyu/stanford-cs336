@@ -53,18 +53,18 @@ def run_train_bpe(
 
     # iterate and find most common pair
     merges: list[bytes_pair] = []
-    while len(vocab) < vocab_size:
-        total_pair_to_count : Counter[bytes_pair] = Counter()
-        for word_tuple in word_tuple_to_count:
-            # update the dict directly
-            update_total_pair_to_count(total_pair_to_count, word_tuple, word_tuple_to_count[word_tuple])
+    # build initial total_pair_to_count
+    total_pair_to_count : Counter[bytes_pair] = Counter()
+    for word_tuple in word_tuple_to_count:
+        update_total_pair_to_count(total_pair_to_count, word_tuple, word_tuple_to_count[word_tuple])
 
+    while len(vocab) < vocab_size:
         most_frequent_pair = get_most_frequent_pair(total_pair_to_count)
         merges.append(most_frequent_pair)
 
         new_vocab = most_frequent_pair[0] + most_frequent_pair[1]
         vocab[new_vocab] = len(vocab)
-        update_word_tuples_to_count(word_tuple_to_count, new_vocab)
+        update_counts(word_tuple_to_count, total_pair_to_count, most_frequent_pair)
     
     return {value: key for key, value in vocab.items()}, merges
 
@@ -105,31 +105,53 @@ def get_word_tuple_to_count(input_path: str | os.PathLike, special_tokens: list[
     return word_tuples_to_count
 
 
-def update_word_tuples_to_count(word_tuples_to_count: dict[tuple[bytes, ...], int], new_vocab: bytes):
+def update_counts(word_tuples_to_count: dict[tuple[bytes, ...], int], total_pair_to_count: Counter[bytes_pair], new_vocab_pair: bytes_pair):
     """updates the tuple[bytes, ...] and merge the common pairs."""
     # list(word_tuples_to_count) only copies a flat list of references (very lightweight). this is to avoid
     # changing a dict's length while iterating it, which python forbids.
     for word_tuple in list(word_tuples_to_count):
-        if word_tuple_has_vocab(word_tuple, new_vocab):
-            new_word_tuple = get_new_word_tuple(word_tuple, new_vocab)
+        match_count = count_new_vocab_matches(word_tuple, new_vocab_pair)
+        if match_count > 0:
+            new_word_tuple = get_new_word_tuple(word_tuple, new_vocab_pair)
             # the new tuple shouldn't exist in the map, because a new word tuple contains
             # something we've never seen before.
             # well is it possible that the new word tuple was added to the dict earlier in
             # this forloop? yes, e.g. if the new_vocab is abc, it could come from ab + c, and a + bc.
-            count = word_tuples_to_count[word_tuple]
-            word_tuples_to_count[new_word_tuple] = word_tuples_to_count.get(new_word_tuple, 0) + count
+            word_count = word_tuples_to_count[word_tuple]
+            word_tuples_to_count[new_word_tuple] = word_tuples_to_count.get(new_word_tuple, 0) + word_count
             del word_tuples_to_count[word_tuple]
 
+            # update total_pair_to_count
+            to_remove = get_pair_to_count(word_tuple)
+            for pair, pair_count in to_remove.items():
+                total_pair_to_count[pair] -= word_count * pair_count
 
-def word_tuple_has_vocab(word_tuple:tuple[bytes, ...], new_vocab: bytes):
+            to_add = get_pair_to_count(new_word_tuple)
+            for pair, pair_count in to_add.items():
+                total_pair_to_count[pair] += word_count * pair_count
+
+
+def get_pair_to_count(word_tuple: tuple[bytes, ...]) -> Counter[bytes_pair]:
+    pair_to_count : Counter[bytes_pair] = Counter()
+    if len(word_tuple) < 2:
+        return pair_to_count
+    
+    for i in range (len(word_tuple) - 1):
+        pair_to_count[(word_tuple[i], word_tuple[i+1])] += 1
+
+    return pair_to_count
+
+
+def count_new_vocab_matches(word_tuple:tuple[bytes, ...], new_vocab_pair: bytes_pair) -> int:
+    matches = 0
     for i in range(len(word_tuple) - 1):
-        pair = word_tuple[i] + word_tuple[i + 1]
-        if pair == new_vocab:
-            return True
-    return False
+        pair = (word_tuple[i], word_tuple[i + 1])
+        if pair == new_vocab_pair:
+            matches += 1
+    return matches
 
 
-def get_new_word_tuple(word_tuple: tuple[bytes, ...], new_vocab: bytes) -> tuple[bytes, ...]:
+def get_new_word_tuple(word_tuple: tuple[bytes, ...], new_vocab_pair: bytes_pair) -> tuple[bytes, ...]:
     """merges neighboring tuples if the pair is equal to new_vocab."""
     if len(word_tuple) < 2:
         return word_tuple
@@ -150,9 +172,9 @@ def get_new_word_tuple(word_tuple: tuple[bytes, ...], new_vocab: bytes) -> tuple
             break
 
         next = word_tuple[i + 1]
-        if curr + next == new_vocab:
+        if (curr, next) == new_vocab_pair:
             found_match_in_last_iter = True
-            new_word_list.append(new_vocab)
+            new_word_list.append(curr + next)
         else:
             new_word_list.append(curr)
 
@@ -197,7 +219,4 @@ def print_var(var):
 
 
 if __name__ == "__main__":
-    # run_train_bpe(sys.argv[1], int(sys.argv[2]), ["<|endoftext|>"])
-    word_tuple = (b't', b'h', b't', b'h', b't', b'h')
-    new_vocab = b'th'
-    print(get_new_word_tuple(word_tuple, new_vocab))
+    run_train_bpe(sys.argv[1], int(sys.argv[2]), ["<|endoftext|>"])
