@@ -39,24 +39,17 @@ def run_train_bpe(
     # pretokenization
     word_tuple_to_count = get_word_tuple_to_count(input_path, special_tokens)
 
-    for w in word_tuple_to_count:
-        for b in w:
-            if len(b) != 1:
-                print(f"word: {w}, vocab: {b}")
-
     # build initial vocabulary
     vocab_list: list[bytes] = [bytes([i]) for i in range(256)]
     for t in special_tokens:
-        vocab_list.append(to_bytes(t))
+        vocab_list.append(t.encode("utf-8"))
 
     vocab = {b: i for i, b in enumerate(vocab_list)}
 
     # iterate and find most common pair
     merges: list[bytes_pair] = []
     # build initial total_pair_to_count
-    total_pair_to_count : Counter[bytes_pair] = Counter()
-    for word_tuple in word_tuple_to_count:
-        update_total_pair_to_count(total_pair_to_count, word_tuple, word_tuple_to_count[word_tuple])
+    total_pair_to_count = get_pair_to_count(word_tuple_to_count)
 
     while len(vocab) < vocab_size:
         most_frequent_pair = get_most_frequent_pair(total_pair_to_count)
@@ -69,10 +62,15 @@ def run_train_bpe(
     return {value: key for key, value in vocab.items()}, merges
 
 
-def update_total_pair_to_count(total_pair_to_count: Counter[bytes_pair], word_tuple: tuple[bytes, ...], word_tuple_count: int):
-    for i in range(len(word_tuple) - 1):
-        pair = (word_tuple[i], word_tuple[i + 1])
-        total_pair_to_count[pair] += word_tuple_count
+def get_pair_to_count(word_tuple_to_count: dict[tuple[bytes, ...], int]) -> Counter[bytes_pair]:
+    pair_to_count : Counter[bytes_pair] = Counter()
+
+    for word_tuple, word_tuple_count in word_tuple_to_count.items():
+        for i in range(len(word_tuple) - 1):
+            pair = (word_tuple[i], word_tuple[i + 1])
+            pair_to_count[pair] += word_tuple_count
+
+    return pair_to_count
 
 
 def get_word_tuple_to_count(input_path: str | os.PathLike, special_tokens: list[str]) -> dict[tuple[bytes, ...], int]:
@@ -105,33 +103,31 @@ def get_word_tuple_to_count(input_path: str | os.PathLike, special_tokens: list[
     return word_tuples_to_count
 
 
-def update_counts(word_tuples_to_count: dict[tuple[bytes, ...], int], total_pair_to_count: Counter[bytes_pair], new_vocab_pair: bytes_pair):
+def update_counts(word_tuple_to_count: dict[tuple[bytes, ...], int], pair_to_count: Counter[bytes_pair], new_vocab_pair: bytes_pair):
     """updates the tuple[bytes, ...] and merge the common pairs."""
     # list(word_tuples_to_count) only copies a flat list of references (very lightweight). this is to avoid
     # changing a dict's length while iterating it, which python forbids.
-    for word_tuple in list(word_tuples_to_count):
+    for word_tuple in list(word_tuple_to_count):
         match_count = count_new_vocab_matches(word_tuple, new_vocab_pair)
         if match_count > 0:
             new_word_tuple = get_new_word_tuple(word_tuple, new_vocab_pair)
-            # the new tuple shouldn't exist in the map, because a new word tuple contains
-            # something we've never seen before.
-            # well is it possible that the new word tuple was added to the dict earlier in
-            # this forloop? yes, e.g. if the new_vocab is abc, it could come from ab + c, and a + bc.
-            word_count = word_tuples_to_count[word_tuple]
-            word_tuples_to_count[new_word_tuple] = word_tuples_to_count.get(new_word_tuple, 0) + word_count
-            del word_tuples_to_count[word_tuple]
 
-            # update total_pair_to_count
-            to_remove = get_pair_to_count(word_tuple)
+            # update word_tuple_to_count
+            word_count = word_tuple_to_count[word_tuple]
+            word_tuple_to_count[new_word_tuple] = word_tuple_to_count.get(new_word_tuple, 0) + word_count
+            del word_tuple_to_count[word_tuple]
+
+            # update total_pair_to_count: remove all contributions of old word tuple, then add new
+            to_remove = get_pair_to_count_for_tuple(word_tuple)
             for pair, pair_count in to_remove.items():
-                total_pair_to_count[pair] -= word_count * pair_count
+                pair_to_count[pair] -= word_count * pair_count
 
-            to_add = get_pair_to_count(new_word_tuple)
+            to_add = get_pair_to_count_for_tuple(new_word_tuple)
             for pair, pair_count in to_add.items():
-                total_pair_to_count[pair] += word_count * pair_count
+                pair_to_count[pair] += word_count * pair_count
 
 
-def get_pair_to_count(word_tuple: tuple[bytes, ...]) -> Counter[bytes_pair]:
+def get_pair_to_count_for_tuple(word_tuple: tuple[bytes, ...]) -> Counter[bytes_pair]:
     pair_to_count : Counter[bytes_pair] = Counter()
     if len(word_tuple) < 2:
         return pair_to_count
@@ -194,10 +190,6 @@ def get_most_frequent_pair(pair_to_count: dict[bytes_pair, int]) -> bytes_pair:
     if len(most_common_pair_ties) == 0:
         raise RuntimeError
     return max(most_common_pair_ties)
-
-
-def to_bytes(w: str) -> bytes:
-    return w.encode("utf-8")
 
 
 def print_var(var):
