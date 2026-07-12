@@ -49,14 +49,17 @@ def find_chunk_boundaries(
     return sorted(set(chunk_boundaries))
 
 
+fn = "assignment1-basics/data/TinyStoriesV2-GPT4-train.txt"
 ## Usage
-with open(..., "rb") as f:
+with open(fn, "rb") as f:
     num_processes = 4
     boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
+    print(boundaries)
 
     # The following is a serial implementation, but you can parallelize this
     # by sending each start/end pair to a set of processes.
     for start, end in zip(boundaries[:-1], boundaries[1:]):
         f.seek(start)
         chunk = f.read(end - start).decode("utf-8", errors="ignore")
+        print(len(chunk))
         # Run pre-tokenization on your chunk and store the counts for each pre-token
