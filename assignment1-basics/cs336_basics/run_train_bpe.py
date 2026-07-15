@@ -5,13 +5,18 @@ import inspect
 from collections import Counter
 from typing import BinaryIO
 from multiprocessing import Pool, cpu_count
+from line_profiler import profile
+from itertools import pairwise
+
 
 
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+CHUNK_SIZE = 100000000
 type bytes_pair = tuple[bytes, bytes]
 
 
+@profile
 def run_train_bpe(
     input_path: str | os.PathLike,
     vocab_size: int,
@@ -52,38 +57,42 @@ def run_train_bpe(
     # iterate and find most common pair
     merges: list[bytes_pair] = []
     # build initial total_pair_to_count
-    total_pair_to_count = get_pair_to_count(word_tuple_to_count)
+    pair_to_count, pair_to_word_tuples = get_pair_to_count(word_tuple_to_count)
 
     while len(vocab) < vocab_size:
-        most_frequent_pair = get_most_frequent_pair(total_pair_to_count)
+        # todo: should store the most frequent pairs, and the words that contain it
+        most_frequent_pair = get_most_frequent_pair(pair_to_count)
         merges.append(most_frequent_pair)
 
         new_vocab = most_frequent_pair[0] + most_frequent_pair[1]
         vocab[new_vocab] = len(vocab)
-        update_counts(word_tuple_to_count, total_pair_to_count, most_frequent_pair)
+        update_counts(word_tuple_to_count, pair_to_count, pair_to_word_tuples, most_frequent_pair)
     
     return {value: key for key, value in vocab.items()}, merges
 
 
 def load_word_tuple_to_count(input_path: str | os.PathLike, special_tokens: list[str]) -> dict[tuple[bytes, ...], int]:
-    word_tuple_to_count : dict[tuple[bytes, ...], int] = {}
+    word_tuple_to_count: Counter[tuple[bytes, ...]] = Counter()
     # read the file in chunks
     with open(input_path, "rb") as f:
-        num_processes = cpu_count()
-        boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
+        # if we split on all the special characters, we will over-decompose and add a million tasks to the pool
+        filesize = os.fstat(f.fileno()).st_size
+        num_chunks = int(filesize / CHUNK_SIZE) + 1
+        boundaries = find_chunk_boundaries(f, num_chunks, b"<|endoftext|>")
         print(boundaries)
 
         results = []
-        with Pool(processes=num_processes) as pool:
+        with Pool(processes=cpu_count()) as pool:
             for start, end in zip(boundaries[:-1], boundaries[1:]):
                 f.seek(start)
                 chunk = f.read(end - start).decode("utf-8")
                 result = pool.apply_async(get_word_tuple_to_count_from_chunk, (chunk, special_tokens, ))
                 results.append(result)
 
+            print('process count: ', len(results))
             for r in results:
                 wt_to_count = r.get()
-                merge_map(word_tuple_to_count, wt_to_count)
+                word_tuple_to_count.update(wt_to_count)
 
     return word_tuple_to_count
 
@@ -136,36 +145,23 @@ def find_chunk_boundaries(
     return sorted(set(chunk_boundaries))
 
 
-def get_pair_to_count(word_tuple_to_count: dict[tuple[bytes, ...], int]) -> Counter[bytes_pair]:
+def get_pair_to_count(word_tuple_to_count: dict[tuple[bytes, ...], int]):
     pair_to_count : Counter[bytes_pair] = Counter()
+    pair_to_word_tuples : dict[bytes_pair, set[tuple[bytes, ...]]] = {}
 
     for word_tuple, word_tuple_count in word_tuple_to_count.items():
-        for i in range(len(word_tuple) - 1):
-            pair = (word_tuple[i], word_tuple[i + 1])
+        for pair in pairwise(word_tuple):
             pair_to_count[pair] += word_tuple_count
+            if pair not in pair_to_word_tuples:
+                pair_to_word_tuples[pair] = set()
+            pair_to_word_tuples[pair].add(word_tuple)
 
-    return pair_to_count
-
-
-def merge_map(dst: dict[tuple[bytes, ...], int], src: dict[tuple[bytes, ...], int]):
-    for k, v in src.items():
-        if k in dst:
-            dst[k] += v
-        else:
-            dst[k] = v
+    return pair_to_count, pair_to_word_tuples
 
 
-def get_word_tuple_to_count_from_chunk(content: str, special_tokens: list[str]) -> dict[tuple[bytes, ...], int]:
+def get_word_tuple_to_count_from_chunk(content: str, special_tokens: list[str]) -> Counter[tuple[bytes, ...]]:
     # first, split on the special tokens.
-    escaped_special_tokens = []
-    for special_token in special_tokens:
-        escaped = re.escape(special_token)
-        escaped_special_tokens.append(escaped)
-
-    # make sure not to use group so that we skip the special tokens themselves.
-    split_pattern = "|".join(escaped_special_tokens)
-
-    splitted = re.split(split_pattern, content)
+    splitted = re.split(get_split_pattern(special_tokens), content)
     word_to_count = Counter()
     for p in splitted:
         if p in special_tokens:
@@ -173,7 +169,7 @@ def get_word_tuple_to_count_from_chunk(content: str, special_tokens: list[str]) 
         for m in re.finditer(PAT, p):
             word_to_count[m.group()] += 1
 
-    word_tuples_to_count: dict[tuple[bytes, ...], int] = {}
+    word_tuples_to_count: Counter[tuple[bytes, ...]] = Counter()
     for word in word_to_count:
         # split the word into tuples
         bytes_tuple = tuple([bytes([x]) for x in word.encode("utf-8")])
@@ -182,45 +178,63 @@ def get_word_tuple_to_count_from_chunk(content: str, special_tokens: list[str]) 
     return word_tuples_to_count
 
 
-def update_counts(word_tuple_to_count: dict[tuple[bytes, ...], int], pair_to_count: Counter[bytes_pair], new_vocab_pair: bytes_pair):
+def get_split_pattern(special_tokens: list[str]) -> str:
+    escaped_special_tokens = []
+    for special_token in special_tokens:
+        escaped = re.escape(special_token)
+        escaped_special_tokens.append(escaped)
+
+    # make sure not to use group so that we skip the special tokens themselves.
+    return "|".join(escaped_special_tokens)
+
+
+@profile
+def update_counts(word_tuple_to_count: dict[tuple[bytes, ...], int], pair_to_count: Counter[bytes_pair], pair_to_word_tuples: dict[bytes_pair, set[tuple[bytes, ...]]], most_frequent_pair: bytes_pair):
     """updates the tuple[bytes, ...] and merge the common pairs."""
     # list(word_tuples_to_count) only copies a flat list of references (very lightweight). this is to avoid
     # changing a dict's length while iterating it, which python forbids.
-    for word_tuple in list(word_tuple_to_count):
-        match_count = count_new_vocab_matches(word_tuple, new_vocab_pair)
-        if match_count > 0:
-            new_word_tuple = get_new_word_tuple(word_tuple, new_vocab_pair)
+    # for word_tuple in list(word_tuple_to_count):
+    # should likely remove this entry after
+    tuples = pair_to_word_tuples[most_frequent_pair]
+    for word_tuple in tuples:
+    # for word_tuple in pair_to_word_tuples[new_vocab_pair]:
+        # match_count = count_new_vocab_matches(word_tuple, most_frequent_pair)
+        # todo: get rid of this check, because match count is certainly positive. maybe add assert instead.
+        # if match_count > 0:
+        new_word_tuple = get_new_word_tuple(word_tuple, most_frequent_pair)
 
-            # update word_tuple_to_count
-            word_count = word_tuple_to_count[word_tuple]
-            word_tuple_to_count[new_word_tuple] = word_tuple_to_count.get(new_word_tuple, 0) + word_count
-            del word_tuple_to_count[word_tuple]
+        # todo: remove the old contribution
+        for pair in pairwise(new_word_tuple):
+            if pair not in pair_to_word_tuples:
+                pair_to_word_tuples[pair] = set()
+            pair_to_word_tuples[pair].add(new_word_tuple)
 
-            # update total_pair_to_count: remove all contributions of old word tuple, then add new
-            to_remove = get_pair_to_count_for_tuple(word_tuple)
-            for pair, pair_count in to_remove.items():
-                pair_to_count[pair] -= word_count * pair_count
+        # update word_tuple_to_count
+        word_count = word_tuple_to_count[word_tuple]
+        word_tuple_to_count[new_word_tuple] = word_tuple_to_count.get(new_word_tuple, 0) + word_count
+        del word_tuple_to_count[word_tuple]
 
-            to_add = get_pair_to_count_for_tuple(new_word_tuple)
-            for pair, pair_count in to_add.items():
-                pair_to_count[pair] += word_count * pair_count
+        # update total_pair_to_count: remove all contributions of old word tuple, then add new
+        to_remove = get_pair_to_count_for_tuple(word_tuple)
+        for pair, pair_count in to_remove.items():
+            pair_to_count[pair] -= word_count * pair_count
+
+        to_add = get_pair_to_count_for_tuple(new_word_tuple)
+        for pair, pair_count in to_add.items():
+            pair_to_count[pair] += word_count * pair_count
 
 
 def get_pair_to_count_for_tuple(word_tuple: tuple[bytes, ...]) -> Counter[bytes_pair]:
     pair_to_count : Counter[bytes_pair] = Counter()
-    if len(word_tuple) < 2:
-        return pair_to_count
-    
-    for i in range (len(word_tuple) - 1):
-        pair_to_count[(word_tuple[i], word_tuple[i+1])] += 1
+    for pair in pairwise(word_tuple):
+        pair_to_count[pair] += 1
 
     return pair_to_count
 
 
 def count_new_vocab_matches(word_tuple:tuple[bytes, ...], new_vocab_pair: bytes_pair) -> int:
     matches = 0
-    for i in range(len(word_tuple) - 1):
-        pair = (word_tuple[i], word_tuple[i + 1])
+    for pair in pairwise(word_tuple):
         if pair == new_vocab_pair:
             matches += 1
     return matches
@@ -258,17 +272,17 @@ def get_new_word_tuple(word_tuple: tuple[bytes, ...], new_vocab_pair: bytes_pair
 
 def get_most_frequent_pair(pair_to_count: dict[bytes_pair, int]) -> bytes_pair:
     highest_count = 0
-    most_common_pair_ties: list[bytes_pair] = []
+    most_common_pairs: list[bytes_pair] = []
     for pair in pair_to_count:
         if pair_to_count[pair] > highest_count:
             highest_count = pair_to_count[pair]
-            most_common_pair_ties = [pair]
+            most_common_pairs = [pair]
         elif pair_to_count[pair] == highest_count:
-            most_common_pair_ties.append(pair)
+            most_common_pairs.append(pair)
 
-    if len(most_common_pair_ties) == 0:
+    if len(most_common_pairs) == 0:
         raise RuntimeError
-    return max(most_common_pair_ties)
+    return max(most_common_pairs)
 
 
 def print_var(var):
