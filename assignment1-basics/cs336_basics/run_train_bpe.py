@@ -9,8 +9,6 @@ from line_profiler import profile
 from itertools import pairwise
 
 
-
-
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 CHUNK_SIZE = 100000000
 type bytes_pair = tuple[bytes, bytes]
@@ -67,7 +65,7 @@ def run_train_bpe(
         new_vocab = most_frequent_pair[0] + most_frequent_pair[1]
         vocab[new_vocab] = len(vocab)
         update_counts(word_tuple_to_count, pair_to_count, pair_to_word_tuples, most_frequent_pair)
-    
+
     return {value: key for key, value in vocab.items()}, merges
 
 
@@ -86,10 +84,16 @@ def load_word_tuple_to_count(input_path: str | os.PathLike, special_tokens: list
             for start, end in zip(boundaries[:-1], boundaries[1:]):
                 f.seek(start)
                 chunk = f.read(end - start).decode("utf-8")
-                result = pool.apply_async(get_word_tuple_to_count_from_chunk, (chunk, special_tokens, ))
+                result = pool.apply_async(
+                    get_word_tuple_to_count_from_chunk,
+                    (
+                        chunk,
+                        special_tokens,
+                    ),
+                )
                 results.append(result)
 
-            print('process count: ', len(results))
+            print("process count: ", len(results))
             for r in results:
                 wt_to_count = r.get()
                 word_tuple_to_count.update(wt_to_count)
@@ -146,8 +150,8 @@ def find_chunk_boundaries(
 
 
 def get_pair_to_count(word_tuple_to_count: dict[tuple[bytes, ...], int]):
-    pair_to_count : Counter[bytes_pair] = Counter()
-    pair_to_word_tuples : dict[bytes_pair, set[tuple[bytes, ...]]] = {}
+    pair_to_count: Counter[bytes_pair] = Counter()
+    pair_to_word_tuples: dict[bytes_pair, set[tuple[bytes, ...]]] = {}
 
     for word_tuple, word_tuple_count in word_tuple_to_count.items():
         for pair in pairwise(word_tuple):
@@ -189,50 +193,54 @@ def get_split_pattern(special_tokens: list[str]) -> str:
 
 
 @profile
-def update_counts(word_tuple_to_count: dict[tuple[bytes, ...], int], pair_to_count: Counter[bytes_pair], pair_to_word_tuples: dict[bytes_pair, set[tuple[bytes, ...]]], most_frequent_pair: bytes_pair):
+def update_counts(
+    word_tuple_to_count: dict[tuple[bytes, ...], int],
+    pair_to_count: Counter[bytes_pair],
+    pair_to_word_tuples: dict[bytes_pair, set[tuple[bytes, ...]]],
+    most_frequent_pair: bytes_pair,
+):
     """updates the tuple[bytes, ...] and merge the common pairs."""
-    # list(word_tuples_to_count) only copies a flat list of references (very lightweight). this is to avoid
+    # list(word_tuples) only copies a flat list of references (very lightweight). this is to avoid
     # changing a dict's length while iterating it, which python forbids.
-    # for word_tuple in list(word_tuple_to_count):
-    # should likely remove this entry after
-    tuples = pair_to_word_tuples[most_frequent_pair]
-    for word_tuple in tuples:
-    # for word_tuple in pair_to_word_tuples[new_vocab_pair]:
-        # match_count = count_new_vocab_matches(word_tuple, most_frequent_pair)
-        # todo: get rid of this check, because match count is certainly positive. maybe add assert instead.
-        # if match_count > 0:
+    word_tuples = pair_to_word_tuples[most_frequent_pair]
+    for word_tuple in list(word_tuples):
         new_word_tuple = get_new_word_tuple(word_tuple, most_frequent_pair)
 
-        # todo: remove the old contribution
+        # add the new_word_tuple to reverse index
         for pair in pairwise(new_word_tuple):
             if pair not in pair_to_word_tuples:
                 pair_to_word_tuples[pair] = set()
             pair_to_word_tuples[pair].add(new_word_tuple)
 
-        # update word_tuple_to_count
+        # update word_tuple_to_count: add new tuple and remove old
         word_count = word_tuple_to_count[word_tuple]
         word_tuple_to_count[new_word_tuple] = word_tuple_to_count.get(new_word_tuple, 0) + word_count
         del word_tuple_to_count[word_tuple]
 
         # update total_pair_to_count: remove all contributions of old word tuple, then add new
+        # also, update the reverse index
         to_remove = get_pair_to_count_for_tuple(word_tuple)
         for pair, pair_count in to_remove.items():
             pair_to_count[pair] -= word_count * pair_count
+            pair_to_word_tuples[pair].remove(word_tuple)
 
         to_add = get_pair_to_count_for_tuple(new_word_tuple)
         for pair, pair_count in to_add.items():
             pair_to_count[pair] += word_count * pair_count
+            pair_to_word_tuples[pair].add(new_word_tuple)
+
+    del pair_to_word_tuples[most_frequent_pair]
 
 
 def get_pair_to_count_for_tuple(word_tuple: tuple[bytes, ...]) -> Counter[bytes_pair]:
-    pair_to_count : Counter[bytes_pair] = Counter()
+    pair_to_count: Counter[bytes_pair] = Counter()
     for pair in pairwise(word_tuple):
         pair_to_count[pair] += 1
 
     return pair_to_count
 
 
-def count_new_vocab_matches(word_tuple:tuple[bytes, ...], new_vocab_pair: bytes_pair) -> int:
+def count_new_vocab_matches(word_tuple: tuple[bytes, ...], new_vocab_pair: bytes_pair) -> int:
     matches = 0
     for pair in pairwise(word_tuple):
         if pair == new_vocab_pair:
