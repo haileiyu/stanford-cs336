@@ -7,10 +7,14 @@ from typing import BinaryIO
 from multiprocessing import Pool, cpu_count
 from line_profiler import profile
 from itertools import pairwise
+import heapq
+from functools import total_ordering
+
 
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 CHUNK_SIZE = 100000000
+PRINT_GAP = 1000
 type bytes_pair = tuple[bytes, bytes]
 
 
@@ -58,7 +62,8 @@ def run_train_bpe(
     pair_to_count, pair_to_word_tuples = get_pair_to_count(word_tuple_to_count)
 
     while len(vocab) < vocab_size:
-        # todo: should store the most frequent pairs, and the words that contain it
+        if len(vocab) % PRINT_GAP == 0:
+            print('vocab', len(vocab), 'merge', len(merges), 'word_tuple_to_count', len(word_tuple_to_count), 'pair_to_count', len(pair_to_count), 'pair_to_word_tuples', len(pair_to_word_tuples))
         most_frequent_pair = get_most_frequent_pair(pair_to_count)
         merges.append(most_frequent_pair)
 
@@ -174,10 +179,10 @@ def get_word_tuple_to_count_from_chunk(content: str, special_tokens: list[str]) 
             word_to_count[m.group()] += 1
 
     word_tuples_to_count: Counter[tuple[bytes, ...]] = Counter()
-    for word in word_to_count:
+    for word, count in word_to_count.items():
         # split the word into tuples
         bytes_tuple = tuple([bytes([x]) for x in word.encode("utf-8")])
-        word_tuples_to_count[bytes_tuple] = word_to_count[word]
+        word_tuples_to_count[bytes_tuple] = count
 
     return word_tuples_to_count
 
@@ -213,6 +218,7 @@ def update_counts(
             pair_to_word_tuples[pair].add(new_word_tuple)
 
         # update word_tuple_to_count: add new tuple and remove old
+        assert word_tuple in word_tuple_to_count
         word_count = word_tuple_to_count[word_tuple]
         word_tuple_to_count[new_word_tuple] = word_tuple_to_count.get(new_word_tuple, 0) + word_count
         del word_tuple_to_count[word_tuple]
@@ -281,11 +287,11 @@ def get_new_word_tuple(word_tuple: tuple[bytes, ...], new_vocab_pair: bytes_pair
 def get_most_frequent_pair(pair_to_count: dict[bytes_pair, int]) -> bytes_pair:
     highest_count = 0
     most_common_pairs: list[bytes_pair] = []
-    for pair in pair_to_count:
-        if pair_to_count[pair] > highest_count:
-            highest_count = pair_to_count[pair]
+    for pair, count in pair_to_count.items():
+        if count > highest_count:
+            highest_count = count
             most_common_pairs = [pair]
-        elif pair_to_count[pair] == highest_count:
+        elif count == highest_count:
             most_common_pairs.append(pair)
 
     if len(most_common_pairs) == 0:
@@ -311,5 +317,52 @@ def print_var(var):
     print(f"{var_name}={repr(var)}")
 
 
+
+@total_ordering
+class Entry:
+    """Heap entry: higher count wins; ties broken by lexicographically larger item."""
+    __slots__ = ("count", "item")
+
+    def __init__(self, count, item):
+        self.count = count
+        self.item = item
+
+    def __lt__(self, other):
+        if self.count != other.count:
+            return self.count > other.count   # higher count surfaces first
+        return self.item > other.item         # then lexicographically larger
+
+    def __eq__(self, other):
+        return self.count == other.count and self.item == other.item
+
+    def __repr__(self):
+        return f"Entry({self.item!r}, count={self.count})"
+
+
+class FreqTracker:
+    def __init__(self):
+        self.counts = Counter()
+        self.heap = []
+
+    def add(self, item):
+        self.counts[item] += 1
+        heapq.heappush(self.heap, Entry(self.counts[item], item))
+
+    def most_frequent(self):
+        while self.heap:
+            top = self.heap[0]
+            if top.count == self.counts[top.item]:
+                return top.item, top.count
+            heapq.heappop(self.heap)
+        return None
+
+
+
 if __name__ == "__main__":
     run_train_bpe(sys.argv[1], int(sys.argv[2]), ["<|endoftext|>"])
+
+
+# todo
+# - run this with caffeinate
+# - print the size of each book keeping count every N iterations
+# - optimize get_most_frequent_pair
