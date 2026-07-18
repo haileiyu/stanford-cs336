@@ -32,6 +32,11 @@ class FreqTracker:
         self.counts[item] += 1
         heapq.heappush(self.heap, Entry(self.counts[item], item))
 
+    def add2(self, item, count):
+        self.counts[item] += count
+        heapq.heappush(self.heap, Entry(self.counts[item], item))
+
+
     def most_frequent(self):
         while self.heap:
             top = self.heap[0]
@@ -49,6 +54,13 @@ if __name__ == "__main__":
     heapq.heappush(h, Entry(2, "abb"))
     heapq.heappush(h, Entry(2, "mango"))
     print(h[0])                # Entry('zebra', count=2)
+
+    f = FreqTracker()
+    f.add2('a', 2)
+    f.add2('b', 1)
+    f.add2('c', 2)
+
+    print(f.most_frequent())
 
     # # tracker demo
     # t = FreqTracker()

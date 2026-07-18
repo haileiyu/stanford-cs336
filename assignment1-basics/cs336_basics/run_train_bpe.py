@@ -11,11 +11,50 @@ import heapq
 from functools import total_ordering
 
 
-
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 CHUNK_SIZE = 100000000
 PRINT_GAP = 1000
 type bytes_pair = tuple[bytes, bytes]
+
+
+@total_ordering
+class Entry:
+    """Heap entry: higher count wins; ties broken by lexicographically larger item."""
+
+    __slots__ = ("count", "item")
+
+    def __init__(self, count, item):
+        self.count = count
+        self.item = item
+
+    def __lt__(self, other):
+        if self.count != other.count:
+            return self.count > other.count  # higher count surfaces first
+        return self.item > other.item  # then lexicographically larger
+
+    def __eq__(self, other):
+        return self.count == other.count and self.item == other.item
+
+    def __repr__(self):
+        return f"Entry({self.item!r}, count={self.count})"
+
+
+class FreqTracker:
+    def __init__(self):
+        self.counts = Counter()
+        self.heap = []
+
+    def add(self, item, count):
+        self.counts[item] += count
+        heapq.heappush(self.heap, Entry(self.counts[item], item))
+
+    def most_frequent(self):
+        while self.heap:
+            top = self.heap[0]
+            if top.count == self.counts[top.item]:
+                return top.item, top.count
+            heapq.heappop(self.heap)
+        raise RuntimeError("heap has no valid entries")
 
 
 @profile
@@ -59,17 +98,28 @@ def run_train_bpe(
     # iterate and find most common pair
     merges: list[bytes_pair] = []
     # build initial total_pair_to_count
-    pair_to_count, pair_to_word_tuples = get_pair_to_count(word_tuple_to_count)
+    pair_to_count_heap, pair_to_word_tuples = get_pair_to_count(word_tuple_to_count)
 
     while len(vocab) < vocab_size:
         if len(vocab) % PRINT_GAP == 0:
-            print('vocab', len(vocab), 'merge', len(merges), 'word_tuple_to_count', len(word_tuple_to_count), 'pair_to_count', len(pair_to_count), 'pair_to_word_tuples', len(pair_to_word_tuples))
-        most_frequent_pair = get_most_frequent_pair(pair_to_count)
+            print(
+                "vocab",
+                len(vocab),
+                "merge",
+                len(merges),
+                "word_tuple_to_count",
+                len(word_tuple_to_count),
+                "pair_to_count",
+                len(pair_to_count),
+                "pair_to_word_tuples",
+                len(pair_to_word_tuples),
+            )
+        most_frequent_pair = get_most_frequent_pair(pair_to_count_heap)
         merges.append(most_frequent_pair)
 
         new_vocab = most_frequent_pair[0] + most_frequent_pair[1]
         vocab[new_vocab] = len(vocab)
-        update_counts(word_tuple_to_count, pair_to_count, pair_to_word_tuples, most_frequent_pair)
+        update_counts(word_tuple_to_count, pair_to_count_heap, pair_to_word_tuples, most_frequent_pair)
 
     return {value: key for key, value in vocab.items()}, merges
 
@@ -156,6 +206,8 @@ def find_chunk_boundaries(
 
 def get_pair_to_count(word_tuple_to_count: dict[tuple[bytes, ...], int]):
     pair_to_count: Counter[bytes_pair] = Counter()
+    # todo: support types in FreqTracker()
+    pair_to_count_heap = FreqTracker()
     pair_to_word_tuples: dict[bytes_pair, set[tuple[bytes, ...]]] = {}
 
     for word_tuple, word_tuple_count in word_tuple_to_count.items():
@@ -164,8 +216,9 @@ def get_pair_to_count(word_tuple_to_count: dict[tuple[bytes, ...], int]):
             if pair not in pair_to_word_tuples:
                 pair_to_word_tuples[pair] = set()
             pair_to_word_tuples[pair].add(word_tuple)
-
-    return pair_to_count, pair_to_word_tuples
+    for pair, count in pair_to_count.items():
+        pair_to_count_heap.add(pair, count)
+    return pair_to_count_heap, pair_to_word_tuples
 
 
 def get_word_tuple_to_count_from_chunk(content: str, special_tokens: list[str]) -> Counter[tuple[bytes, ...]]:
@@ -200,7 +253,7 @@ def get_split_pattern(special_tokens: list[str]) -> str:
 @profile
 def update_counts(
     word_tuple_to_count: dict[tuple[bytes, ...], int],
-    pair_to_count: Counter[bytes_pair],
+    pair_to_count_heap: FreqTracker,
     pair_to_word_tuples: dict[bytes_pair, set[tuple[bytes, ...]]],
     most_frequent_pair: bytes_pair,
 ):
@@ -227,12 +280,14 @@ def update_counts(
         # also, update the reverse index
         to_remove = get_pair_to_count_for_tuple(word_tuple)
         for pair, pair_count in to_remove.items():
-            pair_to_count[pair] -= word_count * pair_count
+            pair_to_count_heap.add(
+                pair, -word_count * pair_count
+            )  # the heap is just an optimization; still need the hashmap
             pair_to_word_tuples[pair].remove(word_tuple)
 
         to_add = get_pair_to_count_for_tuple(new_word_tuple)
         for pair, pair_count in to_add.items():
-            pair_to_count[pair] += word_count * pair_count
+            pair_to_count_heap.add(pair, word_count * pair_count)
             pair_to_word_tuples[pair].add(new_word_tuple)
 
     del pair_to_word_tuples[most_frequent_pair]
@@ -284,19 +339,9 @@ def get_new_word_tuple(word_tuple: tuple[bytes, ...], new_vocab_pair: bytes_pair
     return tuple(new_word_list)
 
 
-def get_most_frequent_pair(pair_to_count: dict[bytes_pair, int]) -> bytes_pair:
-    highest_count = 0
-    most_common_pairs: list[bytes_pair] = []
-    for pair, count in pair_to_count.items():
-        if count > highest_count:
-            highest_count = count
-            most_common_pairs = [pair]
-        elif count == highest_count:
-            most_common_pairs.append(pair)
-
-    if len(most_common_pairs) == 0:
-        raise RuntimeError
-    return max(most_common_pairs)
+def get_most_frequent_pair(pair_to_count_heap: FreqTracker) -> bytes_pair:
+    res = pair_to_count_heap.most_frequent()
+    return res[0]
 
 
 def print_var(var):
@@ -317,52 +362,5 @@ def print_var(var):
     print(f"{var_name}={repr(var)}")
 
 
-
-@total_ordering
-class Entry:
-    """Heap entry: higher count wins; ties broken by lexicographically larger item."""
-    __slots__ = ("count", "item")
-
-    def __init__(self, count, item):
-        self.count = count
-        self.item = item
-
-    def __lt__(self, other):
-        if self.count != other.count:
-            return self.count > other.count   # higher count surfaces first
-        return self.item > other.item         # then lexicographically larger
-
-    def __eq__(self, other):
-        return self.count == other.count and self.item == other.item
-
-    def __repr__(self):
-        return f"Entry({self.item!r}, count={self.count})"
-
-
-class FreqTracker:
-    def __init__(self):
-        self.counts = Counter()
-        self.heap = []
-
-    def add(self, item):
-        self.counts[item] += 1
-        heapq.heappush(self.heap, Entry(self.counts[item], item))
-
-    def most_frequent(self):
-        while self.heap:
-            top = self.heap[0]
-            if top.count == self.counts[top.item]:
-                return top.item, top.count
-            heapq.heappop(self.heap)
-        return None
-
-
-
 if __name__ == "__main__":
     run_train_bpe(sys.argv[1], int(sys.argv[2]), ["<|endoftext|>"])
-
-
-# todo
-# - run this with caffeinate
-# - print the size of each book keeping count every N iterations
-# - optimize get_most_frequent_pair
