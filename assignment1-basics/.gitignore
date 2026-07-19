@@ -171,3 +171,4 @@ data/
 # Documents
 *.pdf
 
+.DS_Store
