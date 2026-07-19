@@ -9,6 +9,8 @@ from line_profiler import profile
 from itertools import pairwise
 import heapq
 from functools import total_ordering
+import pickle
+from pathlib import Path
 
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
@@ -44,7 +46,7 @@ class FreqTracker:
         self.counts = Counter()
         self.heap = []
 
-    def add(self, item, count):
+    def add_or_update(self, item, count):
         self.counts[item] += count
         heapq.heappush(self.heap, Entry(self.counts[item], item))
 
@@ -97,8 +99,7 @@ def run_train_bpe(
 
     # iterate and find most common pair
     merges: list[bytes_pair] = []
-    # build initial total_pair_to_count
-    pair_to_count_heap, pair_to_word_tuples = get_pair_to_count(word_tuple_to_count)
+    most_frequent_pair_tracker, pair_to_word_tuples = get_pair_to_count(word_tuple_to_count)
 
     while len(vocab) < vocab_size:
         if len(vocab) % PRINT_GAP == 0:
@@ -109,17 +110,15 @@ def run_train_bpe(
                 len(merges),
                 "word_tuple_to_count",
                 len(word_tuple_to_count),
-                "pair_to_count",
-                len(pair_to_count),
                 "pair_to_word_tuples",
                 len(pair_to_word_tuples),
             )
-        most_frequent_pair = get_most_frequent_pair(pair_to_count_heap)
+        most_frequent_pair = most_frequent_pair_tracker.most_frequent()[0]
         merges.append(most_frequent_pair)
 
         new_vocab = most_frequent_pair[0] + most_frequent_pair[1]
         vocab[new_vocab] = len(vocab)
-        update_counts(word_tuple_to_count, pair_to_count_heap, pair_to_word_tuples, most_frequent_pair)
+        update_counts(word_tuple_to_count, most_frequent_pair_tracker, pair_to_word_tuples, most_frequent_pair)
 
     return {value: key for key, value in vocab.items()}, merges
 
@@ -207,7 +206,7 @@ def find_chunk_boundaries(
 def get_pair_to_count(word_tuple_to_count: dict[tuple[bytes, ...], int]):
     pair_to_count: Counter[bytes_pair] = Counter()
     # todo: support types in FreqTracker()
-    pair_to_count_heap = FreqTracker()
+    most_frequent_pair_tracker = FreqTracker()
     pair_to_word_tuples: dict[bytes_pair, set[tuple[bytes, ...]]] = {}
 
     for word_tuple, word_tuple_count in word_tuple_to_count.items():
@@ -217,8 +216,8 @@ def get_pair_to_count(word_tuple_to_count: dict[tuple[bytes, ...], int]):
                 pair_to_word_tuples[pair] = set()
             pair_to_word_tuples[pair].add(word_tuple)
     for pair, count in pair_to_count.items():
-        pair_to_count_heap.add(pair, count)
-    return pair_to_count_heap, pair_to_word_tuples
+        most_frequent_pair_tracker.add_or_update(pair, count)
+    return most_frequent_pair_tracker, pair_to_word_tuples
 
 
 def get_word_tuple_to_count_from_chunk(content: str, special_tokens: list[str]) -> Counter[tuple[bytes, ...]]:
@@ -253,7 +252,7 @@ def get_split_pattern(special_tokens: list[str]) -> str:
 @profile
 def update_counts(
     word_tuple_to_count: dict[tuple[bytes, ...], int],
-    pair_to_count_heap: FreqTracker,
+    most_frequent_pair_tracker: FreqTracker,
     pair_to_word_tuples: dict[bytes_pair, set[tuple[bytes, ...]]],
     most_frequent_pair: bytes_pair,
 ):
@@ -280,14 +279,12 @@ def update_counts(
         # also, update the reverse index
         to_remove = get_pair_to_count_for_tuple(word_tuple)
         for pair, pair_count in to_remove.items():
-            pair_to_count_heap.add(
-                pair, -word_count * pair_count
-            )  # the heap is just an optimization; still need the hashmap
+            most_frequent_pair_tracker.add_or_update(pair, -word_count * pair_count)
             pair_to_word_tuples[pair].remove(word_tuple)
 
         to_add = get_pair_to_count_for_tuple(new_word_tuple)
         for pair, pair_count in to_add.items():
-            pair_to_count_heap.add(pair, word_count * pair_count)
+            most_frequent_pair_tracker.add_or_update(pair, word_count * pair_count)
             pair_to_word_tuples[pair].add(new_word_tuple)
 
     del pair_to_word_tuples[most_frequent_pair]
@@ -339,11 +336,6 @@ def get_new_word_tuple(word_tuple: tuple[bytes, ...], new_vocab_pair: bytes_pair
     return tuple(new_word_list)
 
 
-def get_most_frequent_pair(pair_to_count_heap: FreqTracker) -> bytes_pair:
-    res = pair_to_count_heap.most_frequent()
-    return res[0]
-
-
 def print_var(var):
     """this helper function is created by gemini."""
     # 1. Look back at the frame of the code that called this function
@@ -363,4 +355,20 @@ def print_var(var):
 
 
 if __name__ == "__main__":
-    run_train_bpe(sys.argv[1], int(sys.argv[2]), ["<|endoftext|>"])
+    vocab, merges = run_train_bpe(sys.argv[1], int(sys.argv[2]), ["<|endoftext|>"])
+    # print(vocab)
+    vocab_path = Path(sys.argv[3])
+    with open(vocab_path, "wb") as f:  # note: binary mode
+        pickle.dump(vocab, f, protocol=pickle.HIGHEST_PROTOCOL)
+    merges_path = Path(sys.argv[4])
+
+    with open(merges_path, "wb") as f:  # note: binary mode
+        pickle.dump(merges, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    # with open("/Users/admin/cs336/assignment1-basics/vocab.pkl", "rb") as f:
+    #     loaded = pickle.load(f)
+    #     print(loaded)
+    #     if loaded == vocab:
+    #         print('identical')
+    #     else:
+    #         print('different')
