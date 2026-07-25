@@ -17,7 +17,7 @@ PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s
 CHUNK_SIZE = 100000000
 PRINT_GAP = 1000
 type bytes_pair = tuple[bytes, bytes]
-
+type bytes_tuple = tuple[bytes, ...]
 
 @total_ordering
 class Entry:
@@ -123,8 +123,8 @@ def run_train_bpe(
     return {value: key for key, value in vocab.items()}, merges
 
 
-def load_word_tuple_to_count(input_path: str | os.PathLike, special_tokens: list[str]) -> dict[tuple[bytes, ...], int]:
-    word_tuple_to_count: Counter[tuple[bytes, ...]] = Counter()
+def load_word_tuple_to_count(input_path: str | os.PathLike, special_tokens: list[str]) -> dict[bytes_tuple, int]:
+    word_tuple_to_count: Counter[bytes_tuple] = Counter()
     # read the file in chunks
     with open(input_path, "rb") as f:
         # if we split on all the special characters, we will over-decompose and add a million tasks to the pool
@@ -203,11 +203,11 @@ def find_chunk_boundaries(
     return sorted(set(chunk_boundaries))
 
 
-def get_pair_to_count(word_tuple_to_count: dict[tuple[bytes, ...], int]):
+def get_pair_to_count(word_tuple_to_count: dict[bytes_tuple, int]):
     pair_to_count: Counter[bytes_pair] = Counter()
     # todo: support types in FreqTracker()
     most_frequent_pair_tracker = FreqTracker()
-    pair_to_word_tuples: dict[bytes_pair, set[tuple[bytes, ...]]] = {}
+    pair_to_word_tuples: dict[bytes_pair, set[bytes_tuple]] = {}
 
     for word_tuple, word_tuple_count in word_tuple_to_count.items():
         for pair in pairwise(word_tuple):
@@ -220,7 +220,7 @@ def get_pair_to_count(word_tuple_to_count: dict[tuple[bytes, ...], int]):
     return most_frequent_pair_tracker, pair_to_word_tuples
 
 
-def get_word_tuple_to_count_from_chunk(content: str, special_tokens: list[str]) -> Counter[tuple[bytes, ...]]:
+def get_word_tuple_to_count_from_chunk(content: str, special_tokens: list[str]) -> Counter[bytes_tuple]:
     # first, split on the special tokens.
     splitted = re.split(get_split_pattern(special_tokens), content)
     word_to_count = Counter()
@@ -230,11 +230,11 @@ def get_word_tuple_to_count_from_chunk(content: str, special_tokens: list[str]) 
         for m in re.finditer(PAT, p):
             word_to_count[m.group()] += 1
 
-    word_tuples_to_count: Counter[tuple[bytes, ...]] = Counter()
+    word_tuples_to_count: Counter[bytes_tuple] = Counter()
     for word, count in word_to_count.items():
         # split the word into tuples
-        bytes_tuple = tuple([bytes([x]) for x in word.encode("utf-8")])
-        word_tuples_to_count[bytes_tuple] = count
+        bt = tuple([bytes([x]) for x in word.encode("utf-8")])
+        word_tuples_to_count[bt] = count
 
     return word_tuples_to_count
 
@@ -251,12 +251,12 @@ def get_split_pattern(special_tokens: list[str]) -> str:
 
 @profile
 def update_counts(
-    word_tuple_to_count: dict[tuple[bytes, ...], int],
+    word_tuple_to_count: dict[bytes_tuple, int],
     most_frequent_pair_tracker: FreqTracker,
-    pair_to_word_tuples: dict[bytes_pair, set[tuple[bytes, ...]]],
+    pair_to_word_tuples: dict[bytes_pair, set[bytes_tuple]],
     most_frequent_pair: bytes_pair,
 ):
-    """updates the tuple[bytes, ...] and merge the common pairs."""
+    """updates the bytes_tuple and merge the common pairs."""
     # list(word_tuples) only copies a flat list of references (very lightweight). this is to avoid
     # changing a dict's length while iterating it, which python forbids.
     word_tuples = pair_to_word_tuples[most_frequent_pair]
@@ -290,7 +290,7 @@ def update_counts(
     del pair_to_word_tuples[most_frequent_pair]
 
 
-def get_pair_to_count_for_tuple(word_tuple: tuple[bytes, ...]) -> Counter[bytes_pair]:
+def get_pair_to_count_for_tuple(word_tuple: bytes_tuple) -> Counter[bytes_pair]:
     pair_to_count: Counter[bytes_pair] = Counter()
     for pair in pairwise(word_tuple):
         pair_to_count[pair] += 1
@@ -298,7 +298,7 @@ def get_pair_to_count_for_tuple(word_tuple: tuple[bytes, ...]) -> Counter[bytes_
     return pair_to_count
 
 
-def count_new_vocab_matches(word_tuple: tuple[bytes, ...], new_vocab_pair: bytes_pair) -> int:
+def count_new_vocab_matches(word_tuple: bytes_tuple, new_vocab_pair: bytes_pair) -> int:
     matches = 0
     for pair in pairwise(word_tuple):
         if pair == new_vocab_pair:
@@ -306,7 +306,7 @@ def count_new_vocab_matches(word_tuple: tuple[bytes, ...], new_vocab_pair: bytes
     return matches
 
 
-def get_new_word_tuple(word_tuple: tuple[bytes, ...], new_vocab_pair: bytes_pair) -> tuple[bytes, ...]:
+def get_new_word_tuple(word_tuple: bytes_tuple, new_vocab_pair: bytes_pair) -> bytes_tuple:
     """merges neighboring tuples if the pair is equal to new_vocab."""
     if len(word_tuple) < 2:
         return word_tuple
