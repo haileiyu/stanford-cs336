@@ -1,2 +1,4 @@
 # Editor settings
 .vscode/
+
+.DS_Store
