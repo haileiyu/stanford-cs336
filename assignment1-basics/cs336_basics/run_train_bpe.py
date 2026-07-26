@@ -241,6 +241,7 @@ def get_word_tuple_to_count_from_chunk(content: str, special_tokens: list[str]) 
 
 def get_split_pattern(special_tokens: list[str]) -> str:
     escaped_special_tokens = []
+    special_tokens.sort(key=len, reverse=True)
     for special_token in special_tokens:
         escaped = re.escape(special_token)
         escaped_special_tokens.append(escaped)
