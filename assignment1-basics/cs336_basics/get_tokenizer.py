@@ -1,29 +1,34 @@
-from typing import IO, Any, BinaryIO, Iterable, Iterator
+from typing import Any, Iterable, Iterator
 from cs336_basics.run_train_bpe import get_split_pattern, PAT
 import regex as re
-from collections import Counter
-from itertools import pairwise
 import pickle
+from multiprocessing import Pool
+import math
 
 
 type bytes_pair = tuple[bytes, bytes]
+type bytes_tuple = tuple[bytes, ...]
 type int_pair = tuple[int, int]
+NUM_PROCESSES = 8  # parallelization
+CHUNK_SIZE = 100000
 
 
 class Tokenizer:
-    def __init__(self, vocab: dict[int, bytes], merges : list[tuple[bytes, bytes]], special_tokens:list[str] | None =None):
+    def __init__(
+        self, vocab: dict[int, bytes], merges: list[tuple[bytes, bytes]], special_tokens: list[str] | None = None
+    ):
         self.vocab = vocab
-        self.inverse_vocab : dict[bytes, int] = {}
+        self.inverse_vocab: dict[bytes, int] = {}
         for i, v in vocab.items():
             self.inverse_vocab[v] = i
 
-        self.idx_merges : dict[int_pair, int] = {}
+        self.idx_merges: dict[int_pair, int] = {}
         for i, m in enumerate(merges):
-            t : int_pair = (self.inverse_vocab[m[0]], self.inverse_vocab[m[1]])
+            t: int_pair = (self.inverse_vocab[m[0]], self.inverse_vocab[m[1]])
             self.idx_merges[t] = i
 
         if special_tokens:
-            self.special_tokens : list[str] = special_tokens
+            self.special_tokens: list[str] = special_tokens
             for s in special_tokens:
                 new_idx = len(self.vocab)
                 # only give the special token an id if it doesn't already exist in the vocab
@@ -33,49 +38,67 @@ class Tokenizer:
                     self.inverse_vocab[encoded_bytes] = new_idx
 
         else:
-            self.special_tokens : list[str] = []
+            self.special_tokens: list[str] = []
 
-
+    @classmethod
     def from_files(cls, vocab_filepath, merges_filepath, special_tokens=None):
-        with open(vocab_filepath, "wb") as f:  # note: binary mode
-            pickle.dump(vocab, f, protocol=pickle.HIGHEST_PROTOCOL)
-        with open(merges_filepath, "wb") as f:  # note: binary mode
-            pickle.dump(merges, f, protocol=pickle.HIGHEST_PROTOCOL)
+        vocab: dict[int, bytes] = {}
+        merges: list[tuple[bytes, bytes]] = []
+        with open(vocab_filepath, "rb") as f:  # note: binary mode
+            vocab = pickle.load(f)
+        with open(merges_filepath, "rb") as f:  # note: binary mode
+            merges = pickle.load(f)
         return Tokenizer(vocab, merges, special_tokens)
-
 
     def encode(self, text: str) -> list[int]:
         pretokenized = self.pretokenize(text, self.special_tokens)
+        start = 0
+        res = []
+        while start < len(pretokenized):
+            end = min(len(pretokenized), start + CHUNK_SIZE * NUM_PROCESSES)
+            curr_working_set = pretokenized[start:end]
+            # then split the working set into chunks
+            num_processes = math.ceil(len(curr_working_set) / CHUNK_SIZE)
+            input_list: list[list[bytes_tuple | str]] = []
+            # todo: optimize: don't copy the string
+            for i in range(0, num_processes):
+                chunk_start = i * CHUNK_SIZE
+                chunk_end = chunk_start + CHUNK_SIZE
+                view = curr_working_set[chunk_start:chunk_end]
+                input_list.append(view)
+            with Pool(num_processes) as pool:
+                results = pool.map(self.encode_chunk, input_list)
+                for r in results:
+                    res.extend(r)
+            start = end
+        return res
 
-        res : list[int] = []
-        for p in pretokenized:
+    def encode_chunk(self, chunk: list[bytes_tuple | str]) -> list[int]:
+        # todo: otpimize: return npy int16
+        res: list[int] = []
+        for p in chunk:
             if isinstance(p, str):
                 # special token
                 res.append(self.inverse_vocab[p.encode("utf-8")])
                 continue
-        
-            for w in p:
-                idxs = self.convert_word_tuple_to_idx(w)
-                res.extend(idxs)
+            idxs = self.convert_word_tuple_to_idx(p)
+            res.extend(idxs)
 
         return res
-
 
     def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
         for s in iterable:
             for e in self.encode(s):
                 yield e
 
-
     def decode(self, ids: list[int]) -> str:
-        s : bytes = b''
+        s: bytes = b""
         for id in ids:
             token = self.vocab[id]
             s = s + token
-        return s.decode("utf-8", errors='replace')
+        return s.decode("utf-8", errors="replace")
 
-
-    def pretokenize(self, text: str, special_tokens: list[str]) -> list[list[tuple[bytes, ...]] | str]:
+    def pretokenize(self, text: str, special_tokens: list[str]) -> list[bytes_tuple | str]:
         # split on the special tokens.
         if len(special_tokens) > 0:
             # in get_split_pattern, we deliberately didn't use group so that the special tokens are discarded.
@@ -83,14 +106,16 @@ class Tokenizer:
             split_pattern = "(" + get_split_pattern(special_tokens) + ")"
             splitted = re.split(split_pattern, text)
         else:
-            splitted = [text] # if no special token, do not split
+            splitted = [text]  # if no special token, do not split
 
         res = []
-        word_tuples : list[tuple[bytes, ...]] = []
+        word_tuples: list[tuple[bytes, ...]] = []
         for p in splitted:
             if p in special_tokens:
                 if len(word_tuples) > 0:
-                    res.append(word_tuples)
+                    res.extend(
+                        word_tuples
+                    )  # flush the previous tuples; todo: should simplify this since we don't have list of list
                     word_tuples = []
                 res.append(p)
                 continue
@@ -99,11 +124,10 @@ class Tokenizer:
                 bytes_tuple = tuple([bytes([x]) for x in word.encode("utf-8")])
                 word_tuples.append(bytes_tuple)
 
-        res.append(word_tuples)
+        res.extend(word_tuples)
         return res
 
-
-    def convert_word_tuple_to_idx(self, word_tuple: tuple[bytes, ...]) -> list[int]:
+    def convert_word_tuple_to_idx(self, word_tuple: bytes_tuple) -> list[int]:
         word_tuple_idx = []
         for t in word_tuple:
             word_tuple_idx.append(self.inverse_vocab[t])
@@ -111,13 +135,12 @@ class Tokenizer:
         input = word_tuple_idx
         output = self.merge(input)
         # keep merging until you cannot merge anymore
-        while (len(output) < len(input)):
+        while len(output) < len(input):
             input = output
             output = self.merge(input)
 
         return output
 
-    
     def merge(self, word_tuple_idx: list[int]) -> list[int]:
         if len(word_tuple_idx) < 2:
             return word_tuple_idx
@@ -125,7 +148,7 @@ class Tokenizer:
         lowest_rank = len(self.idx_merges) + 1
         lowest_rank_idx = -1
         for i in range(0, len(word_tuple_idx) - 1):
-            p : int_pair = (word_tuple_idx[i], word_tuple_idx[i+1])
+            p: int_pair = (word_tuple_idx[i], word_tuple_idx[i + 1])
             if p in self.idx_merges:
                 rank = self.idx_merges[p]
                 if rank < lowest_rank:
@@ -135,18 +158,29 @@ class Tokenizer:
         if lowest_rank_idx == -1:
             return word_tuple_idx
 
-        new_bytes = self.vocab[word_tuple_idx[lowest_rank_idx]] + self.vocab[word_tuple_idx[lowest_rank_idx+1]]
+        new_bytes = self.vocab[word_tuple_idx[lowest_rank_idx]] + self.vocab[word_tuple_idx[lowest_rank_idx + 1]]
         new_idx = self.inverse_vocab[new_bytes]
-        return word_tuple_idx[0:lowest_rank_idx] + [new_idx] + word_tuple_idx[lowest_rank_idx+2:]
+        return word_tuple_idx[0:lowest_rank_idx] + [new_idx] + word_tuple_idx[lowest_rank_idx + 2 :]
 
 
 if __name__ == "__main__":
-    vocab : dict[int, bytes] = {0: b' ', 1: b'a', 2: b'c', 3: b'e', 4: b'h', 5: b't', 6: b'th', 7: b' c', 8: b' a', 9: b'the', 10: b' at'}
-    merges : list[bytes_pair] = [(b't', b'h'), (b' ', b'c'), (b' ', b'a'), (b'th', b'e'), (b' a',b't')]
+    vocab: dict[int, bytes] = {
+        0: b" ",
+        1: b"a",
+        2: b"c",
+        3: b"e",
+        4: b"h",
+        5: b"t",
+        6: b"th",
+        7: b" c",
+        8: b" a",
+        9: b"the",
+        10: b" at",
+    }
+    merges: list[bytes_pair] = [(b"t", b"h"), (b" ", b"c"), (b" ", b"a"), (b"th", b"e"), (b" a", b"t")]
     t = Tokenizer(vocab, merges, None)
     text = "the cat ate"
     print(t.encode(text))
-
 
 
 def get_tokenizer(
