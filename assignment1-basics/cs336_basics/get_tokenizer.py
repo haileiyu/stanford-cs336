@@ -1,3 +1,6 @@
+"""Tokenizer impl for cs336."""
+# todo: parallelize the pretokenization process -- to use less memory overall.
+# todo: in `encode`, there are various slices. investigate if those slicing would cause unnecessary copying.
 from typing import Any, Iterable, Iterator
 from cs336_basics.run_train_bpe import get_split_pattern, PAT
 import regex as re
@@ -60,7 +63,6 @@ class Tokenizer:
             # then split the working set into chunks
             num_processes = math.ceil(len(curr_working_set) / CHUNK_SIZE)
             input_list: list[list[bytes_tuple | str]] = []
-            # todo: optimize: don't copy the string
             for i in range(0, num_processes):
                 chunk_start = i * CHUNK_SIZE
                 chunk_end = chunk_start + CHUNK_SIZE
@@ -74,7 +76,6 @@ class Tokenizer:
         return res
 
     def encode_chunk(self, chunk: list[bytes_tuple | str]) -> list[int]:
-        # todo: otpimize: return npy int16
         res: list[int] = []
         for p in chunk:
             if isinstance(p, str):
@@ -99,7 +100,6 @@ class Tokenizer:
         return s.decode("utf-8", errors="replace")
 
     def pretokenize(self, text: str, special_tokens: list[str]) -> list[bytes_tuple | str]:
-        # split on the special tokens.
         if len(special_tokens) > 0:
             # in get_split_pattern, we deliberately didn't use group so that the special tokens are discarded.
             # while that works for bpe, in the tokenizer we do need to keep the special tokens.
@@ -109,22 +109,15 @@ class Tokenizer:
             splitted = [text]  # if no special token, do not split
 
         res = []
-        word_tuples: list[tuple[bytes, ...]] = []
         for p in splitted:
             if p in special_tokens:
-                if len(word_tuples) > 0:
-                    res.extend(
-                        word_tuples
-                    )  # flush the previous tuples; todo: should simplify this since we don't have list of list
-                    word_tuples = []
                 res.append(p)
-                continue
-            for m in re.finditer(PAT, p):
-                word = m.group()
-                bytes_tuple = tuple([bytes([x]) for x in word.encode("utf-8")])
-                word_tuples.append(bytes_tuple)
+            else:
+                for m in re.finditer(PAT, p):
+                    word = m.group()
+                    bytes_tuple = tuple([bytes([x]) for x in word.encode("utf-8")])
+                    res.append(bytes_tuple)
 
-        res.extend(word_tuples)
         return res
 
     def convert_word_tuple_to_idx(self, word_tuple: bytes_tuple) -> list[int]:
