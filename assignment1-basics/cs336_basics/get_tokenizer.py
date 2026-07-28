@@ -1,5 +1,5 @@
 """Tokenizer impl for cs336."""
-# todo: parallelize the pretokenization process -- to use less memory overall.
+# todo: parallelize the pretokenization process -- to use less memory overall, otherwise the process is killed.
 # todo: in `encode`, there are various slices. investigate if those slicing would cause unnecessary copying.
 from typing import Any, Iterable, Iterator
 from cs336_basics.run_train_bpe import get_split_pattern, PAT
@@ -33,10 +33,10 @@ class Tokenizer:
         if special_tokens:
             self.special_tokens: list[str] = special_tokens
             for s in special_tokens:
-                new_idx = len(self.vocab)
                 # only give the special token an id if it doesn't already exist in the vocab
                 encoded_bytes = s.encode("utf-8")
                 if not encoded_bytes in self.inverse_vocab:
+                    new_idx = len(self.vocab)
                     self.vocab[new_idx] = encoded_bytes
                     self.inverse_vocab[encoded_bytes] = new_idx
 
@@ -54,7 +54,7 @@ class Tokenizer:
         return Tokenizer(vocab, merges, special_tokens)
 
     def encode(self, text: str) -> list[int]:
-        pretokenized = self.pretokenize(text, self.special_tokens)
+        pretokenized = self._pretokenize(text, self.special_tokens)
         start = 0
         res = []
         while start < len(pretokenized):
@@ -69,20 +69,20 @@ class Tokenizer:
                 view = curr_working_set[chunk_start:chunk_end]
                 input_list.append(view)
             with Pool(num_processes) as pool:
-                results = pool.map(self.encode_chunk, input_list)
+                results = pool.map(self._encode_chunk, input_list)
                 for r in results:
                     res.extend(r)
             start = end
         return res
 
-    def encode_chunk(self, chunk: list[bytes_tuple | str]) -> list[int]:
+    def _encode_chunk(self, chunk: list[bytes_tuple | str]) -> list[int]:
         res: list[int] = []
         for p in chunk:
             if isinstance(p, str):
                 # special token
                 res.append(self.inverse_vocab[p.encode("utf-8")])
                 continue
-            idxs = self.convert_word_tuple_to_idx(p)
+            idxs = self._convert_word_tuple_to_idx(p)
             res.extend(idxs)
 
         return res
@@ -99,7 +99,7 @@ class Tokenizer:
             s = s + token
         return s.decode("utf-8", errors="replace")
 
-    def pretokenize(self, text: str, special_tokens: list[str]) -> list[bytes_tuple | str]:
+    def _pretokenize(self, text: str, special_tokens: list[str]) -> list[bytes_tuple | str]:
         if len(special_tokens) > 0:
             # in get_split_pattern, we deliberately didn't use group so that the special tokens are discarded.
             # while that works for bpe, in the tokenizer we do need to keep the special tokens.
@@ -120,21 +120,21 @@ class Tokenizer:
 
         return res
 
-    def convert_word_tuple_to_idx(self, word_tuple: bytes_tuple) -> list[int]:
+    def _convert_word_tuple_to_idx(self, word_tuple: bytes_tuple) -> list[int]:
         word_tuple_idx = []
         for t in word_tuple:
             word_tuple_idx.append(self.inverse_vocab[t])
 
         input = word_tuple_idx
-        output = self.merge(input)
+        output = self._merge(input)
         # keep merging until you cannot merge anymore
         while len(output) < len(input):
             input = output
-            output = self.merge(input)
+            output = self._merge(input)
 
         return output
 
-    def merge(self, word_tuple_idx: list[int]) -> list[int]:
+    def _merge(self, word_tuple_idx: list[int]) -> list[int]:
         if len(word_tuple_idx) < 2:
             return word_tuple_idx
 
