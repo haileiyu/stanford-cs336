@@ -2,11 +2,12 @@
 # todo: parallelize the pretokenization process -- to use less memory overall, otherwise the process is killed.
 # todo: in `encode`, there are various slices. investigate if those slicing would cause unnecessary copying.
 from typing import Any, Iterable, Iterator
-from cs336_basics.run_train_bpe import get_split_pattern, PAT
 import regex as re
 import pickle
 from multiprocessing import Pool
 import math
+
+from cs336_basics.run_train_bpe import get_split_pattern, PAT
 
 
 type bytes_pair = tuple[bytes, bytes]

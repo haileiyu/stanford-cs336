@@ -1,10 +1,8 @@
 import sys
-import random
-from cs336_basics.get_tokenizer import get_tokenizer as tokenizer
-from cs336_basics.get_tokenizer import Tokenizer
-import pickle
 import time
 import numpy as np
+
+from cs336_basics.tokenizer import Tokenizer
 
 
 def encode_doc(doc_path: str, vocab_path: str, merges_path: str, output_path: str | None) -> list[int]:
