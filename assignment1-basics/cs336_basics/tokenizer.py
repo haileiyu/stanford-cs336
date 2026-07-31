@@ -1,4 +1,5 @@
 """Tokenizer impl for cs336."""
+
 # todo: parallelize the pretokenization process -- to use less memory overall, otherwise the process is killed.
 # todo: in `encode`, there are various slices. investigate if those slicing would cause unnecessary copying.
 from typing import Any, Iterable, Iterator
@@ -175,4 +176,3 @@ if __name__ == "__main__":
     t = Tokenizer(vocab, merges, None)
     text = "the cat ate"
     print(t.encode(text))
-

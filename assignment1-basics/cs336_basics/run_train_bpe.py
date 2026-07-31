@@ -19,6 +19,7 @@ PRINT_GAP = 1000
 type bytes_pair = tuple[bytes, bytes]
 type bytes_tuple = tuple[bytes, ...]
 
+
 @total_ordering
 class Entry:
     """Heap entry: higher count wins; ties broken by lexicographically larger item."""
