@@ -13,7 +13,7 @@ class RotaryPositionalEmbedding(nn.Module):
         self.max_seq_len = max_seq_len
         self.device = device
         # let's cache the sins and coses
-        t = self.create_theta(torch.arange(max_seq_len, device=device))
+        t = self._create_theta(torch.arange(max_seq_len, device=device))
         c, s = torch.cos(t), torch.sin(t)
         self.register_buffer("cos_cached", c, persistent=False)
         self.register_buffer("sin_cached", s, persistent=False)
@@ -27,7 +27,7 @@ class RotaryPositionalEmbedding(nn.Module):
         r = torch.stack([c * q1 - s * q2, s * q1 + c * q2], dim=-1).flatten(-2)
         return r
 
-    def create_theta(self, token_positions: Tensor):
+    def _create_theta(self, token_positions: Tensor):
         # d_k / 2 is a float. use // to avoid potential landmines in the future.
         k = (torch.arange(self.d_k // 2, device=self.device)) * 2 / self.d_k
         # [:, None] adds a trailing dimension for the broadcast division to work
