@@ -12,7 +12,3 @@ class Embedding(nn.Module):
 
     def forward(self, token_ids: Tensor) -> Tensor:
         return self.embedding[token_ids]
-
-
-if __name__ == "__main__":
-    print("hello")

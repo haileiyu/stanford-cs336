@@ -11,7 +11,3 @@ class Linear(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         out = einsum(x, self.weights, "... b, c b -> ... c")
         return out
-
-
-if __name__ == "__main__":
-    print("linear")
