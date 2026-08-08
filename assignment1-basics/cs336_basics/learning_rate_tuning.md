@@ -1,0 +1,44 @@
+# experiment
+
+try the learning rate at 1e1, 1e2, 1e3, and see the loss.
+
+```
+➜  assignment1-basics git:(main) ✗ uv run python3 cs336_basics/learning_rate_tuning.py
+22.846113204956055
+14.621512413024902
+10.77835464477539
+8.432910919189453
+6.830657958984375
+5.663398265838623
+4.776325225830078
+4.08150577545166
+3.5247011184692383
+3.070406436920166
+➜  assignment1-basics git:(main) ✗ uv run python3 cs336_basics/learning_rate_tuning.py
+19.7857608795166
+19.7857608795166
+3.394699811935425
+0.08124282211065292
+8.947704006725726e-17
+9.972771740323335e-19
+3.35818300408138e-20
+2.0004926906068823e-21
+1.7161518793966758e-22
+1.906835526733316e-23
+➜  assignment1-basics git:(main) ✗ uv run python3 cs336_basics/learning_rate_tuning.py
+28.5211124420166
+10296.12109375
+1778302.25
+197817136.0
+16023187456.0
+1011246628864.0
+51914095984640.0
+2233566469554176.0
+8.232449002071654e+16
+2.643531067650212e+18
+```
+
+so:
+- with 1e1, the learning was fine and one-directional. loss keeps descending.
+- with 1e2, the learning accelerated and the loss descended faster.
+- with 1e3, however, the loss exploded (diverge).

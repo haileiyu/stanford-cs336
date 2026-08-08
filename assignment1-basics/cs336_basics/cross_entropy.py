@@ -20,8 +20,8 @@ def cross_entropy(
     """
     # assert the shape of inputs and targets
     # if passed in higher dimensional tensors, we should fix
-    assert(inputs.dim() == 2)
-    assert(targets.dim() == 1)
+    assert inputs.dim() == 2
+    assert targets.dim() == 1
     # first, for numeric stability, subtract the max of the row
     m, _ = inputs.max(dim=-1, keepdim=True)
     stablized_in = inputs - m
@@ -32,7 +32,7 @@ def cross_entropy(
     logsumexp = torch.log(sumexp)  # shape should be (batch_size,)
 
     batch_size = targets.shape[-1]
-    i = stablized_in[torch.arange(batch_size,device=inputs.device), targets]
+    i = stablized_in[torch.arange(batch_size, device=inputs.device), targets]
 
     t = logsumexp - i
     return t.mean()
