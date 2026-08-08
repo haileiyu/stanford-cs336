@@ -18,17 +18,21 @@ def cross_entropy(
     Returns:
         Float[Tensor, ""]: The average cross-entropy loss across examples.
     """
+    # assert the shape of inputs and targets
+    # if passed in higher dimensional tensors, we should fix
+    assert(inputs.dim() == 2)
+    assert(targets.dim() == 1)
     # first, for numeric stability, subtract the max of the row
     m, _ = inputs.max(dim=-1, keepdim=True)
     stablized_in = inputs - m
 
     # second, do the simplified cross entropy formula
     e = torch.exp(stablized_in)
-    sumexp = e.sum(-1, keepdim=True)
+    sumexp = e.sum(-1, keepdim=False)
     logsumexp = torch.log(sumexp)  # shape should be (batch_size,)
 
-    batch_size = inputs.shape[0]
-    i = stablized_in[torch.arange(batch_size), targets]
+    batch_size = targets.shape[-1]
+    i = stablized_in[torch.arange(batch_size,device=inputs.device), targets]
 
     t = logsumexp - i
     return t.mean()
