@@ -8,19 +8,19 @@ from cs336_basics.rope import RotaryPositionalEmbedding
 
 
 # flop:
-# 3 x 2 x ... x num_heads x d_k x d_model x seq
-# + (4 x d_k + 5) x ... x num_heads x seq x seq
-# + 2 x d_model x d_model x ... x seq
-# also, + 2 x 3 x ... x num_heads x seq x d_k if rope is enabled
+# 3 * 2 * ... * num_heads * d_k * d_model * seq
+# + (4 * d_k + 5) * ... * num_heads * seq * seq
+# + 2 * d_model * d_model * ... * seq
+# also, + 2 * 3 * ... * num_heads * seq * d_k if rope is enabled
 #
-# = 6 x ... x seq x d_model^2
-# + (4 x d_k + 5) x ... x num_heads x seq^2
-# + 2 x ... x seq x d_model^2
-# also, + 6 x ... x seq x d_model if rope is enabled
+# = 6 * ... * seq * d_model^2
+# + (4 * d_k + 5) * ... * num_heads * seq^2
+# + 2 * ... * seq * d_model^2
+# also, + 6 * ... * seq * d_model if rope is enabled
 #
-# = 8 x ... x seq x d_model^2
-# + (4 x d_k + 5) x ... x num_heads x seq^2
-# also, + 6 x ... x seq x d_model if rope is enabled
+# = 8 * ... * seq * d_model^2
+# + (4 * d_k + 5) * ... * num_heads * seq^2
+# also, + 6 * ... * seq * d_model if rope is enabled
 class MultiheadSelfAttention(nn.Module):
     def __init__(
         self,
@@ -58,7 +58,7 @@ class MultiheadSelfAttention(nn.Module):
         v_rearranged = einops.rearrange(v_proj_weight, "(a1 a2) b -> a1 a2 b", a1=self.num_heads)
 
         # let's do multi head now
-        # flop: for each line: 2 x ... x num_heads x d_k x d_model x seq
+        # flop: for each line: 2 * ... * num_heads * d_k * d_model * seq
         wqx = einsum(
             q_rearranged, in_features, "num_heads d_k d_model, ... seq d_model -> ... num_heads seq d_k"
         )  # shape is (... num_heads, seq, d_k)
@@ -71,32 +71,32 @@ class MultiheadSelfAttention(nn.Module):
             if token_positions is None:
                 seq = in_features.shape[-2]
                 token_positions = torch.arange(seq, device=device)
-            # flop: for each line: 3 x ... x num_heads x seq x d_k
+            # flop: for each line: 3 * ... * num_heads * seq * d_k
             wqx = self.rope.forward(wqx, token_positions)
             wkx = self.rope.forward(wkx, token_positions)
 
         d_query = wqx.shape[-2]
         d_key = wkx.shape[-2]
-        # memory: d_query x d_key
+        # memory: d_query * d_key
         # flop: 0
         mask = torch.tril(torch.ones(d_query, d_key, device=device)).bool()
 
         # memory: todo
-        # flop: # 2 x ... x queries x keys x d_k +
-        #         5 x ... x queries x keys +
-        #         2 x ... x queries x keys x d_v
-        # where queries is seq, keys is seq, d_k == d_v, ... is ... x num_heads
+        # flop: # 2 * ... * queries * keys * d_k +
+        #         5 * ... * queries * keys +
+        #         2 * ... * queries * keys * d_v
+        # where queries is seq, keys is seq, d_k == d_v, ... is ... * num_heads
         # so the result is:
-        # 4 x ... x num_heads x seq x seq x d_k + 5 x ... x num_heads x seq x seq
-        # = (4 x d_k + 5) x ... x num_heads x seq x seq
+        # 4 * ... * num_heads * seq * seq * d_k + 5 * ... * num_heads * seq * seq
+        # = (4 * d_k + 5) * ... * num_heads * seq * seq
         a = scaled_dot_product_attention(wqx, wkx, wvx, mask)  # shape: (..., num_heads, seq d_k)
 
         # collapse
         # flop: 0
-        # memory: ... x num_heads x seq x d_k (since this moves axis across another)
+        # memory: ... * num_heads * seq * d_k (since this moves axis across another)
         a_concat = einops.rearrange(a, "... num_heads seq d_k -> ... seq (num_heads d_k)")  # shape: (..., seq, d_model)
 
-        # flop: 2 x d_model x d_model x ... x seq
+        # flop: 2 * d_model * d_model * ... * seq
         # memory: todo
         r = einsum(o_proj_weight, a_concat, "a b, ... seq b -> ... seq a")
         return r

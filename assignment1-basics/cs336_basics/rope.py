@@ -18,17 +18,17 @@ class RotaryPositionalEmbedding(nn.Module):
         self.register_buffer("cos_cached", c, persistent=False)
         self.register_buffer("sin_cached", s, persistent=False)
 
-    # flop: 3 x sequence_length x d_k
+    # flop: 3 * sequence_length * d_k
     def forward(self, q: Tensor, token_positions: Tensor) -> Tensor:
         """input shapes: q: Float[Tensor, " ... sequence_length d_k"]
         token_positions: Int[Tensor, " ... sequence_length"]
-        flop: 3 x ... x sequence_length x d_k"""
+        flop: 3 * ... * sequence_length * d_k"""
         c = self.cos_cached[token_positions]  # shape is (... sequence_length, d_k // 2)
         s = self.sin_cached[token_positions]
         q1, q2 = q[..., 0::2], q[..., 1::2]  # shape is (... sequence_length, d_k // 2)
-        # flop for multiplication is 4 x sequence_length x d_k // 2 = 2 x sequence_length x d_k
-        # flop for addition is 2 x sequence_length x d_k // 2 = sequence_length x d_k
-        # total flop: 3 x sequence_length x d_k
+        # flop for multiplication is 4 * sequence_length * d_k // 2 = 2 * sequence_length * d_k
+        # flop for addition is 2 * sequence_length * d_k // 2 = sequence_length * d_k
+        # total flop: 3 * sequence_length * d_k
         r = torch.stack([c * q1 - s * q2, s * q1 + c * q2], dim=-1).flatten(-2)
         return r  # shape is (... sequence_length, d_k)
 
