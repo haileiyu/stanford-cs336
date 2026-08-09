@@ -1,7 +1,6 @@
 """this code is sample code from the handout, page 30."""
 
-from collections.abc import Callable, Iterable
-from typing import Any, Optional
+from typing import Any
 import torch
 import math
 
@@ -41,4 +40,3 @@ def training_loop(learning_rate: float, num_iterations: int):
 
 if __name__ == "__main__":
     training_loop(1e3, 10)
-
