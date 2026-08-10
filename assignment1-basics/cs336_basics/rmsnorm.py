@@ -11,14 +11,22 @@ class RMSNorm(nn.Module):
         self.weights: nn.Parameter = nn.Parameter(init_weights)
         self.eps = eps
 
+    # flop: 3 * ... + 2 * ... * d_model + 2 * ... * d_model
+    # = 4 * ... * d_model + 3 * ...
     def forward(self, x: Tensor) -> Tensor:
+        """x: Float[Tensor, " ... d_model]"""
         in_dtype = x.dtype
         x = x.to(torch.float32)
 
-        suma = (x * x).sum(-1, keepdim=True)
-        suma /= self.d_model
+        # flop: ... * d_model + ... * d_model = 2 * ... * d_model
+        suma = (x * x).sum(-1, keepdim=True) # shape: (...,)
+        # flop: ...
+        suma /= self.d_model # shape: (...,)
+        # flop: ...
         suma += self.eps
+        # flop: ...
         suma = torch.sqrt(suma)
+        # flop: ... * d_model + ... * d_model = 2 * ... * d_model
         result = x * self.weights / suma
 
         return result.to(in_dtype)
