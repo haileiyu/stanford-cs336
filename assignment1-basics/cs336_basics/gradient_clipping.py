@@ -15,8 +15,11 @@ def gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: flo
 
     The gradients of the parameters (parameter.grad) should be modified in-place.
     """
+    # store the input parameters to a list, since it's an Iterable that promises to be iterated once, but
+    # we're iterating twice here. if the input is a generator (yield), the second loop would get nothing.
+    parameters_list = list(parameters)
     square_sum = 0
-    for p in parameters:
+    for p in parameters_list:
         if p.grad is not None:
             square_sum += (p.grad**2).sum()
 
@@ -26,6 +29,6 @@ def gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: flo
 
     scale_factor = max_l2_norm / (g_2 + eps)
 
-    for p in parameters:
+    for p in parameters_list:
         if p.grad is not None:
             p.grad *= scale_factor
