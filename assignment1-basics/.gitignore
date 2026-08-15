@@ -175,3 +175,6 @@ data/
 
 *.npy
 *.pkl
+
+# Training checkpoints
+*.cpt

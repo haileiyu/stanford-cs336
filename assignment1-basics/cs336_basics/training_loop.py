@@ -29,7 +29,7 @@ warmup_iters = 50
 cosine_cycle_iters = num_iterations
 
 checkpoint_iters = 10
-checkpoint_file = "/Users/admin/cs336/assignment1-basics/tiny_stories_10000_checkpoint"
+checkpoint_file = "/Users/admin/cs336/assignment1-basics/tiny_stories_10000_checkpoint.cpt"
 
 device = "mps"
 training_data = "/Users/admin/cs336/assignment1-basics/tiny_stories_10000_ids.npy"
