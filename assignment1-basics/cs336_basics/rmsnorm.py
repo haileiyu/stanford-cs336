@@ -7,8 +7,8 @@ class RMSNorm(nn.Module):
         super().__init__()
         # todo: replace the weight initialization with init_weights
         self.d_model = d_model
-        init_weights = torch.ones(d_model, device=device, dtype=dtype)
-        self.weights: nn.Parameter = nn.Parameter(init_weights)
+        init_weight = torch.ones(d_model, device=device, dtype=dtype)
+        self.weight: nn.Parameter = nn.Parameter(init_weight)
         self.eps = eps
 
     # flop: 3 * ... + 2 * ... * d_model + 2 * ... * d_model
@@ -19,14 +19,14 @@ class RMSNorm(nn.Module):
         x = x.to(torch.float32)
 
         # flop: ... * d_model + ... * d_model = 2 * ... * d_model
-        suma = (x * x).sum(-1, keepdim=True) # shape: (...,)
+        suma = (x * x).sum(-1, keepdim=True)  # shape: (...,)
         # flop: ...
-        suma /= self.d_model # shape: (...,)
+        suma /= self.d_model  # shape: (...,)
         # flop: ...
         suma += self.eps
         # flop: ...
         suma = torch.sqrt(suma)
         # flop: ... * d_model + ... * d_model = 2 * ... * d_model
-        result = x * self.weights / suma
+        result = x * self.weight / suma
 
         return result.to(in_dtype)

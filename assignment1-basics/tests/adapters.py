@@ -46,7 +46,7 @@ def run_linear(
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
     l = Linear(d_in, d_out)
-    l.load_state_dict({"weights": weights})
+    l.load_state_dict({"weight": weights})
     return l.forward(in_features)
 
 
@@ -69,7 +69,7 @@ def run_embedding(
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
     e = Embedding(vocab_size, d_model)
-    e.load_state_dict({"embedding": weights})
+    e.load_state_dict({"weight": weights})
     return e.forward(token_ids)
 
 
@@ -99,11 +99,8 @@ def run_swiglu(
     # If your state dict keys match, you can use `load_state_dict()`
     # swiglu.load_state_dict(weights)
     # You can also manually assign the weights
-    # swiglu.w1.weight.data = w1_weight
-    # swiglu.w2.weight.data = w2_weight
-    # swiglu.w3.weight.data = w3_weight
     s = SwiGLU(d_model, d_ff)
-    s.load_state_dict({"w1_weight": w1_weight, "w2_weight": w2_weight, "w3_weight": w3_weight})
+    s.load_state_dict({"w1.weight": w1_weight, "w2.weight": w2_weight, "w3.weight": w3_weight})
     return s.forward(in_features)
 
 
@@ -160,7 +157,8 @@ def run_multihead_self_attention(
         implementation with the given QKV projection weights and input features.
     """
     m = MultiheadSelfAttention(d_model, num_heads)
-    return m(q_proj_weight, k_proj_weight, v_proj_weight, o_proj_weight, in_features)
+    m.load_state_dict({"q_proj.weight": q_proj_weight, "k_proj.weight": k_proj_weight, "v_proj.weight": v_proj_weight, "output_proj.weight": o_proj_weight})
+    return m(in_features)
 
 
 def run_multihead_self_attention_with_rope(
@@ -201,7 +199,8 @@ def run_multihead_self_attention_with_rope(
         implementation with the given QKV projection weights and input features.
     """
     m = MultiheadSelfAttention(d_model, num_heads, max_seq_len, theta)
-    return m(q_proj_weight, k_proj_weight, v_proj_weight, o_proj_weight, in_features, token_positions)
+    m.load_state_dict({"q_proj.weight": q_proj_weight, "k_proj.weight": k_proj_weight, "v_proj.weight": v_proj_weight, "output_proj.weight": o_proj_weight})
+    return m(in_features, token_positions)
 
 
 def run_rope(
@@ -298,7 +297,8 @@ def run_transformer_block(
         running the Transformer block on the input features while using RoPE.
     """
     tb = TransformerBlock(d_model, num_heads, d_ff, max_seq_len, theta)
-    return tb(weights, in_features)
+    tb.load_state_dict(weights)
+    return tb(in_features)
 
 
 def run_transformer_lm(
@@ -381,7 +381,8 @@ def run_transformer_lm(
         next-word distribution for each token.
     """
     tlm = TransformerLM(vocab_size, context_length, d_model, num_layers, num_heads, d_ff, rope_theta)
-    return tlm(weights, in_indices)
+    tlm.load_state_dict(weights)
+    return tlm(in_indices)
 
 
 def run_rmsnorm(
@@ -405,7 +406,7 @@ def run_rmsnorm(
         RMSNorm of the `in_features`.
     """
     r = RMSNorm(d_model, eps)
-    r.load_state_dict({"weights": weights})
+    r.load_state_dict({"weight": weights})
     return r.forward(in_features)
 
 

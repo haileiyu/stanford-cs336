@@ -5,6 +5,7 @@ import einops
 from einops import einsum
 from cs336_basics.attention import scaled_dot_product_attention
 from cs336_basics.rope import RotaryPositionalEmbedding
+from cs336_basics.linear import Linear
 
 
 # flop:
@@ -34,6 +35,11 @@ class MultiheadSelfAttention(nn.Module):
         self.d_model = d_model
         self.num_heads = num_heads
 
+        self.q_proj = Linear(d_model, d_model)
+        self.k_proj = Linear(d_model, d_model)
+        self.v_proj = Linear(d_model, d_model)
+        self.output_proj = Linear(d_model, d_model)
+
         # if rope params are supplied
         if max_seq_len is not None and theta is not None:
             self.rope = RotaryPositionalEmbedding(theta, d_model // num_heads, max_seq_len)
@@ -42,20 +48,16 @@ class MultiheadSelfAttention(nn.Module):
 
     def forward(
         self,
-        q_proj_weight: Float[Tensor, " d_model d_model"],
-        k_proj_weight: Float[Tensor, " d_model d_model"],
-        v_proj_weight: Float[Tensor, " d_model d_model"],
-        o_proj_weight: Float[Tensor, " d_model d_model"],
         in_features: Float[Tensor, " ... seq d_model"],
         token_positions: Int[Tensor, " ... seq"] | None = None,
     ) -> Float[Tensor, " ... seq d_model"]:
         # rearranges, if not moving an axis past another one, is a ~free operation (no memory movements, no arithmetic)
         # flop: 0
         q_rearranged = einops.rearrange(
-            q_proj_weight, "(a1 a2) b -> a1 a2 b", a1=self.num_heads
+            self.q_proj.weight, "(a1 a2) b -> a1 a2 b", a1=self.num_heads
         )  # shape: (num_heads, d_k, d_model)
-        k_rearranged = einops.rearrange(k_proj_weight, "(a1 a2) b -> a1 a2 b", a1=self.num_heads)
-        v_rearranged = einops.rearrange(v_proj_weight, "(a1 a2) b -> a1 a2 b", a1=self.num_heads)
+        k_rearranged = einops.rearrange(self.k_proj.weight, "(a1 a2) b -> a1 a2 b", a1=self.num_heads)
+        v_rearranged = einops.rearrange(self.v_proj.weight, "(a1 a2) b -> a1 a2 b", a1=self.num_heads)
 
         # let's do multi head now
         # flop: for each line: 2 * ... * num_heads * d_k * d_model * seq
@@ -98,5 +100,5 @@ class MultiheadSelfAttention(nn.Module):
 
         # flop: 2 * d_model * d_model * ... * seq
         # memory: todo
-        r = einsum(o_proj_weight, a_concat, "a b, ... seq b -> ... seq a")
+        r = einsum(self.output_proj.weight, a_concat, "a b, ... seq b -> ... seq a")
         return r
