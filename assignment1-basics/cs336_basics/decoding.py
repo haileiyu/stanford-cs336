@@ -1,3 +1,5 @@
+import torch
+from torch import Tensor
 from cs336_basics.transformer import TransformerLM
 from cs336_basics.training_loop import (
     d_model,
@@ -12,11 +14,37 @@ from cs336_basics.training_loop import (
 from cs336_basics.tokenizer import Tokenizer
 from cs336_basics.adamw import AdamW
 from cs336_basics.data_loading import load_checkpoint
-import torch
-
+from cs336_basics.softmax import SoftMax
 
 
 endoftext_str = "<|endoftext|>"
+temperature = 0.8
+top_p_threshold = 0.9
+
+
+def apply_temperature(logits: Tensor) -> Tensor:
+    logits = logits / temperature
+    s = SoftMax(0)
+    return s(logits)
+
+
+def top_p(sml: Tensor) -> int:
+    sorted_sml, orig_positions = torch.sort(sml, descending=True)
+
+    # find the first n elements that sum to p
+    sum = 0.0
+    i_p = 0
+    for i in range(0, len(sorted_sml)):
+        sum += sorted_sml[i]
+        if sum >= top_p_threshold:
+            i_p = i
+            break
+
+    sorted_sml = sorted_sml[0 : i_p + 1]
+    selected_probability = int(torch.multinomial(sorted_sml, 1).item())
+
+    return int(orig_positions[selected_probability].item())
+
 
 class Decoder:
     def __init__(self):
@@ -36,7 +64,8 @@ class Decoder:
 
 
 if __name__ == "__main__":
-    prompt = "a fat cat is"
+    # prompt = "a fat cat is"
+    prompt = "holy cow!"
 
     # tokenize
     vocab_path = "/Users/admin/cs336/assignment1-basics/tiny_stories_10000_vocab.pkl"
@@ -47,7 +76,7 @@ if __name__ == "__main__":
 
     # encoding
     token_indexes = tokenizer.encode(prompt)
-    
+
     endoftext_index = tokenizer.inverse_vocab[endoftext_str.encode("utf-8")]
 
     # forward
@@ -70,25 +99,23 @@ if __name__ == "__main__":
 
     # torch.no_grad would save memory by turning off the grad (for back propagation)
     with torch.no_grad():
-
         for i in range(num_iters):
             # truncate to context_length
-            context_window = token_indexes[-context_length :]
+            context_window = token_indexes[-context_length:]
 
             # convert to a tensor, flatten, and feed into transformer
             out = tlm(torch.tensor(context_window, dtype=torch.long, device=device).unsqueeze(0))
 
-            # pick the most likely token, and append to the list, and loop
-            index = out[0, -1, :].argmax().item()
-            
+            # divide by temperature
+            sml = apply_temperature(out[0, -1, :])
+
+            # top-p
+            index = top_p(sml)
+
             # break if end of text
             if index == endoftext_index:
                 print("end")
                 break
-            
+
             token_indexes.append(index)
             print(tokenizer.decode([index]), end="", flush=True)
-
-    print()
-    print(token_indexes)
-    print(tokenizer.decode(token_indexes))
