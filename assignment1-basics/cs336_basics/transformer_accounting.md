@@ -68,22 +68,23 @@ that's 6561811200 bytes, or roughly 6GB.
 
 > Identify the matrix multiplies required to complete a forward pass of our GPT-2 XL-shaped model. How many FLOPs do these matrix multiplies require in total? Assume that our input sequence has context_length tokens.
 
-
 *Deliverable: A list of matrix multiplies (with descriptions), and the total number of FLOPs required.*
 
+it contains the following parts:
+- token embedding: 0, since we're not doing any math, simply looking up the vectors.
+- num_layers of transformer blocks: see below.
+- norm: the input is (context_length, d_model), so the 
+- linear
+- softmax
 
-
---- lol why am i computing the flop, scratch, need update.
-
-### flop calculation
+### for the multi head attention blocks
 
 from multihead_self_attention.py, flop is:
 # = 8 * ... * seq * d_model^2
 # + (4 * d_k + 5) * ... * num_heads * seq^2
 # also, + 6 * ... * seq * d_model if rope is enabled
 
-what does ... include?
-- batch size, which is 1 i guess.
+what does ... include? 1, since the question says "input sequence has context_length tokens".
 
 so: seq = 1024, num_heads = 25, d_model = 1600, and ... = 1
 also, d_k is d_model / num_heads = 64
@@ -94,6 +95,7 @@ the transformer part's flop is:
 
 flop = 48 * 27813478400 = 1.335e12
 
+for the other parts
 
 ## question c
 

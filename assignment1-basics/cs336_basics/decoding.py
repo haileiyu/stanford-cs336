@@ -18,37 +18,16 @@ from cs336_basics.softmax import SoftMax
 
 
 endoftext_str = "<|endoftext|>"
-temperature = 0.8
-top_p_threshold = 0.9
-
-
-def apply_temperature(logits: Tensor) -> Tensor:
-    logits = logits / temperature
-    s = SoftMax(0)
-    return s(logits)
-
-
-def top_p(sml: Tensor) -> int:
-    sorted_sml, orig_positions = torch.sort(sml, descending=True)
-
-    # find the first n elements that sum to p
-    sum = 0.0
-    i_p = 0
-    for i in range(0, len(sorted_sml)):
-        sum += sorted_sml[i]
-        if sum >= top_p_threshold:
-            i_p = i
-            break
-
-    sorted_sml = sorted_sml[0 : i_p + 1]
-    selected_probability = int(torch.multinomial(sorted_sml, 1).item())
-
-    return int(orig_positions[selected_probability].item())
 
 
 class Decoder:
-    def __init__(self):
-        self.tlm = TransformerLM(
+    def __init__(self, vocab_path: str, merges_path: str, temperature=0.8, top_p_threshold=0.9):
+        self.temperature = temperature
+        self.top_p_threshold = top_p_threshold
+        self.tokenizer = Tokenizer.from_files(vocab_path, merges_path, [endoftext_str])
+        self.endoftext_index = self.tokenizer.inverse_vocab[endoftext_str.encode("utf-8")]
+
+        self.transformer = TransformerLM(
             vocab_size=vocab_size,
             context_length=context_length,
             d_model=d_model,
@@ -57,65 +36,60 @@ class Decoder:
             d_ff=d_ff,
             rope_theta=rope_theta,
         ).to(device)
-        self.temperature = 0.8
+        self.optimizer = AdamW(params=self.transformer.parameters())
+        self.soft_max = SoftMax(0)
 
-    def generate(self, input):
-        raise NotImplementedError
+    def top_p(self, input: Tensor) -> int:
+        sorted, orig_positions = torch.sort(input, descending=True)
+
+        # find the first n elements that sum to p
+        sum = 0.0
+        i_p = 0
+        for i in range(0, len(sorted)):
+            sum += sorted[i]
+            if sum >= self.top_p_threshold:
+                i_p = i
+                break
+
+        sorted = sorted[0 : i_p + 1]
+        selected_probability = int(torch.multinomial(sorted, 1).item())
+
+        return int(orig_positions[selected_probability].item())
+
+    def decode(self, prompt: str, num_iters: int, checkpoint_path):
+        checkpointed_iter = load_checkpoint(checkpoint_path, self.transformer, self.optimizer)
+        token_indexes = self.tokenizer.encode(prompt)
+
+        # torch.no_grad would save memory by turning off the grad (for back propagation)
+        with torch.no_grad():
+            for i in range(num_iters):
+                # truncate to context_length
+                context_window = token_indexes[-context_length:]
+
+                # convert to a tensor, flatten, and feed into transformer
+                out = self.transformer(torch.tensor(context_window, dtype=torch.long, device=device).unsqueeze(0))
+
+                # divide by temperature
+                sml = self.soft_max(out[0, -1, :] / self.temperature)
+
+                # top-p
+                index = self.top_p(sml)
+
+                # break if end of text
+                if index == self.endoftext_index:
+                    print("~~~end~~~")
+                    break
+
+                token_indexes.append(index)
+                print(self.tokenizer.decode([index]), end="", flush=True)
 
 
 if __name__ == "__main__":
-    # prompt = "a fat cat is"
-    prompt = "holy cow!"
-
-    # tokenize
     vocab_path = "/Users/admin/cs336/assignment1-basics/tiny_stories_10000_vocab.pkl"
     merges_path = "/Users/admin/cs336/assignment1-basics/tiny_stories_10000_merges.pkl"
-    tokenizer = Tokenizer.from_files(vocab_path, merges_path, [endoftext_str])
-
     checkpoint_path = "/Users/admin/cs336/assignment1-basics/tiny_stories_10000_checkpoint.cpt"
+    d = Decoder(vocab_path, merges_path)
 
-    # encoding
-    token_indexes = tokenizer.encode(prompt)
-
-    endoftext_index = tokenizer.inverse_vocab[endoftext_str.encode("utf-8")]
-
-    # forward
-    tlm = TransformerLM(
-        vocab_size=vocab_size,
-        context_length=context_length,
-        d_model=d_model,
-        num_layers=num_layers,
-        num_heads=num_heads,
-        d_ff=d_ff,
-        rope_theta=rope_theta,
-    ).to(device)
-    optimizer = AdamW(params=tlm.parameters())
-
-    checkpointed_iter = load_checkpoint(checkpoint_path, tlm, optimizer)
-
-    num_iters = 100
-
+    prompt = "holy cow!"
     print(prompt)
-
-    # torch.no_grad would save memory by turning off the grad (for back propagation)
-    with torch.no_grad():
-        for i in range(num_iters):
-            # truncate to context_length
-            context_window = token_indexes[-context_length:]
-
-            # convert to a tensor, flatten, and feed into transformer
-            out = tlm(torch.tensor(context_window, dtype=torch.long, device=device).unsqueeze(0))
-
-            # divide by temperature
-            sml = apply_temperature(out[0, -1, :])
-
-            # top-p
-            index = top_p(sml)
-
-            # break if end of text
-            if index == endoftext_index:
-                print("end")
-                break
-
-            token_indexes.append(index)
-            print(tokenizer.decode([index]), end="", flush=True)
+    d.decode(prompt, 200, checkpoint_path)
