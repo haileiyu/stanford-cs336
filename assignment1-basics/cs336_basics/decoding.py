@@ -77,7 +77,7 @@ class Decoder:
 
                 # break if end of text
                 if index == self.endoftext_index:
-                    print("~~~end~~~")
+                    print("~~~the end~~~")
                     break
 
                 token_indexes.append(index)
@@ -90,6 +90,6 @@ if __name__ == "__main__":
     checkpoint_path = "/Users/admin/cs336/assignment1-basics/tiny_stories_10000_checkpoint.cpt"
     d = Decoder(vocab_path, merges_path)
 
-    prompt = "holy cow!"
-    print(prompt)
-    d.decode(prompt, 200, checkpoint_path)
+    prompt = "Angie"
+    print(prompt, end="", flush=True)
+    d.decode(prompt, 1000, checkpoint_path)

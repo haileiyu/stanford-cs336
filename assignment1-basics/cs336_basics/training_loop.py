@@ -7,6 +7,7 @@ from cs336_basics.cross_entropy import cross_entropy
 from cs336_basics.gradient_clipping import gradient_clipping
 from cs336_basics.learning_rate_schedule import lr_cosine_schedule
 from cs336_basics.data_loading import save_checkpoint, load_checkpoint
+import wandb
 
 
 batch_size = 32
@@ -22,7 +23,7 @@ num_heads = 16
 max_l2_norm = 1.0
 
 # learning rate schedule
-num_iterations = 1000
+num_iterations = 5000
 max_lr = 1e-3
 min_lr = 1e-4
 warmup_iters = 50
@@ -55,6 +56,8 @@ def training_loop(num_iterations: int, should_load_checkpoint: bool = False):
     if should_load_checkpoint:
         checkpointed_iter = load_checkpoint(checkpoint_file, tlm, optimizer)
         print("loaded checkpoint at iteration", checkpointed_iter)
+        
+    wandb.init(project="cs336-a1", config={"lr": 1e-3, "batch_size": 32})
 
     for iter in range(checkpointed_iter + 1, num_iterations):
         lr = lr_cosine_schedule(iter, max_lr, min_lr, warmup_iters, cosine_cycle_iters)
@@ -70,6 +73,7 @@ def training_loop(num_iterations: int, should_load_checkpoint: bool = False):
         optimizer.zero_grad()  # reset the gradients for all learnable parameters
         loss = cross_entropy(flattened_out, flattened_expected_out)
         print(loss.item())
+        wandb.log({"loss": loss, "lr": lr}, step=iter)
         loss.backward()  # run backward pass, which computes gradients
 
         gradient_clipping(tlm.parameters(), max_l2_norm)
@@ -77,7 +81,7 @@ def training_loop(num_iterations: int, should_load_checkpoint: bool = False):
         optimizer.step()
 
         # check point
-        if iter % checkpoint_iters == 0:
+        if iter % checkpoint_iters == 0 and iter > checkpoint_iters:
             print("saving checkpoint at iteration", iter)
             save_checkpoint(tlm, optimizer, iter, checkpoint_file)
 

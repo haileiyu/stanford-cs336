@@ -2,3 +2,6 @@
 .vscode/
 
 .DS_Store
+
+# Weights & Biases run logs and cache
+wandb/
