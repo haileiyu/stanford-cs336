@@ -24,8 +24,8 @@ max_l2_norm = 1.0
 
 # learning rate schedule
 num_iterations = 5000
-max_lr = 1e-3
-min_lr = 1e-4
+# max_lr = 1e-4
+# min_lr = max_lr / 10
 warmup_iters = 50
 cosine_cycle_iters = num_iterations
 
@@ -36,7 +36,7 @@ device = "mps"
 training_data = "/Users/admin/cs336/assignment1-basics/tiny_stories_10000_ids.npy"
 
 
-def training_loop(num_iterations: int, should_load_checkpoint: bool = False):
+def training_loop(num_iterations: int, max_lr: float, should_load_checkpoint: bool = False):
 
     dataset = numpy.load(training_data, mmap_mode="r")
 
@@ -57,10 +57,10 @@ def training_loop(num_iterations: int, should_load_checkpoint: bool = False):
         checkpointed_iter = load_checkpoint(checkpoint_file, tlm, optimizer)
         print("loaded checkpoint at iteration", checkpointed_iter)
         
-    wandb.init(project="cs336-a1", config={"lr": 1e-3, "batch_size": 32})
+    wandb.init(project="cs336-a1", config={"lr": max_lr, "batch_size": batch_size})
 
     for iter in range(checkpointed_iter + 1, num_iterations):
-        lr = lr_cosine_schedule(iter, max_lr, min_lr, warmup_iters, cosine_cycle_iters)
+        lr = lr_cosine_schedule(iter, max_lr, max_lr/10, warmup_iters, cosine_cycle_iters)
         for g in optimizer.param_groups:
             g["lr"] = lr
 
@@ -72,7 +72,7 @@ def training_loop(num_iterations: int, should_load_checkpoint: bool = False):
 
         optimizer.zero_grad()  # reset the gradients for all learnable parameters
         loss = cross_entropy(flattened_out, flattened_expected_out)
-        print(loss.item())
+        # print(loss.item())
         wandb.log({"loss": loss, "lr": lr}, step=iter)
         loss.backward()  # run backward pass, which computes gradients
 
@@ -88,7 +88,15 @@ def training_loop(num_iterations: int, should_load_checkpoint: bool = False):
     # final save
     print("finally, saving the training")
     save_checkpoint(tlm, optimizer, num_iterations - 1, checkpoint_file)
+    wandb.finish()
 
 
 if __name__ == "__main__":
-    training_loop(num_iterations, False)
+    # lr = 1e-4
+    # training_loop(num_iterations, lr, False)
+    # lr = 1e-5
+    # training_loop(num_iterations, lr, False)
+    # lr = 1e-2
+    # training_loop(num_iterations, lr, False)
+    lr = 1e-3
+    training_loop(num_iterations, lr, False)
