@@ -107,8 +107,9 @@ def training_loop(num_iterations: int, max_lr: float, batch_size: int, should_lo
 
 
 if __name__ == "__main__":
-    for batch_size in [16, 32, 64, 128]:
+    for batch_size in [16, 32, 64]:
         num_iterations = token_budget // (batch_size * context_length)
-        lr = 1e-3 * (batch_size / 32) ** 0.5
+        # lr = 1e-3 * (batch_size / 32) ** 0.5
+        lr = 1e-3
         print(f"batch_size={batch_size} num_iterations={num_iterations} lr={lr:.2e}")
         training_loop(num_iterations, lr, batch_size, False)

@@ -90,6 +90,6 @@ if __name__ == "__main__":
     checkpoint_path = "/Users/admin/cs336/assignment1-basics/tiny_stories_10000_checkpoint.cpt"
     d = Decoder(vocab_path, merges_path)
 
-    prompt = "Angie"
+    prompt = "Once upon a time,"
     print(prompt, end="", flush=True)
     d.decode(prompt, 1000, checkpoint_path)
