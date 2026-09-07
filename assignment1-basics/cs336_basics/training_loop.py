@@ -65,7 +65,7 @@ def training_loop(num_iterations: int, max_lr: float, batch_size: int, should_lo
         
     wandb.init(
         project="cs336-a1",
-        name=f"bs{batch_size}_lr{max_lr:.1e}",
+        name=f"ablation_rope_bs{batch_size}_lr{max_lr:.1e}",
         config={
             "lr": max_lr,
             "batch_size": batch_size,
@@ -87,7 +87,6 @@ def training_loop(num_iterations: int, max_lr: float, batch_size: int, should_lo
 
         optimizer.zero_grad()  # reset the gradients for all learnable parameters
         loss = cross_entropy(flattened_out, flattened_expected_out)
-        # print(loss.item())
         wandb.log({"loss": loss, "lr": lr, "tokens": (iter + 1) * batch_size * context_length}, step=iter)
         loss.backward()  # run backward pass, which computes gradients
 
@@ -107,7 +106,7 @@ def training_loop(num_iterations: int, max_lr: float, batch_size: int, should_lo
 
 
 if __name__ == "__main__":
-    for batch_size in [16, 32, 64]:
+    for batch_size in [32]:
         num_iterations = token_budget // (batch_size * context_length)
         # lr = 1e-3 * (batch_size / 32) ** 0.5
         lr = 1e-3
